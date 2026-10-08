@@ -260,6 +260,9 @@ app.post('/api/exams/:id/start', async (req, res) => {
 app.get('/api/attempts/:id', async (req, res) => {
   const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { include: { questions: { orderBy: { createdAt: 'asc' } } } }, answers: true } });
   if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+  const auth = authOf(req)!;
+  if (auth.role === 'STUDENT' && attempt.studentId !== auth.userId) return res.status(403).json({ message: 'You can only view your own attempt' });
+  if (auth.role === 'FACULTY' && attempt.exam.facultyId !== auth.userId) return res.status(403).json({ message: 'You can only view attempts for your own exams' });
   const questions = attempt.exam.questions.map(({ answerKey, ...q }) => q);
   const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = attempt;
   return res.json({ attempt: studentAttempt, exam: { ...attempt.exam, questions } });
@@ -295,12 +298,14 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
 });
 
 app.get('/api/attempts/:id/monitoring', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
   try {
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: req.params.id },
       include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, questions: { select: { id: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.examId && (await prisma.exam.findUnique({ where: { id: attempt.examId }, select: { facultyId: true } }))?.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'You can only inspect your own exams' });
     const features = extractFeatures(attempt.monitoringEvents, attempt.answers, attempt.exam.questions.length, attempt.startedAt);
     const detection = scoreAnomaly(attempt.monitoringEvents, await prisma.exam.findUniqueOrThrow({ where: { id: attempt.examId }, select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } }));
     return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features, anomaly: detection });
@@ -334,12 +339,14 @@ app.put('/api/attempts/:id/answers', async (req, res) => {
 });
 
 app.get('/api/attempts/:id/similarity', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
   try {
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: req.params.id },
       include: { answers: true, exam: { include: { questions: { select: { id: true, type: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'You can only inspect attempts for your own exams' });
 
     const comparableAttempts = await prisma.examAttempt.findMany({
       where: {
@@ -385,6 +392,7 @@ app.post('/api/attempts/:id/submit', async (req, res) => {
   try {
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { answers: true, exam: { include: { questions: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.studentId !== authOf(req)!.userId) return res.status(403).json({ message: 'You can only submit your own attempt' });
     if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is already closed' });
     const now = new Date();
     const expired = attempt.expiresAt <= now;
@@ -398,10 +406,15 @@ app.post('/api/attempts/:id/submit', async (req, res) => {
 app.get('/api/exams/:id', async (req, res) => {
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
-  return res.json(exam);
+  const auth = authOf(req)!;
+  if (auth.role === 'FACULTY' && exam.facultyId !== auth.userId) return res.status(403).json({ message: 'You can only view your own exams' });
+  if (auth.role === 'STUDENT' && exam.status !== 'LIVE') return res.status(403).json({ message: 'This test is not available to students' });
+  const { joinCode, ...publicExam } = exam;
+  return res.json(auth.role === 'FACULTY' ? exam : publicExam);
 });
 
 app.post('/api/exams/:id/questions', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
   const { type, prompt, marks, options, answerKey } = req.body;
   if (!prompt || !marks || !['MCQ', 'DESCRIPTIVE'].includes(type)) return res.status(400).json({ message: 'type, prompt and marks are required' });
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
@@ -422,11 +435,11 @@ app.post('/api/exams/:id/questions', async (req, res) => {
 });
 
 app.patch('/api/exams/:id/end', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
   try {
-    const { facultyId } = req.body;
     const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
     if (!exam) return res.status(404).json({ message: 'Test not found' });
-    if (exam.facultyId !== String(facultyId ?? '')) return res.status(403).json({ message: 'Only the test owner can end this session' });
+    if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the test owner can end this session' });
     if (exam.status !== 'LIVE') return res.status(409).json({ message: 'This test is not currently live' });
 
     const now = new Date();
@@ -443,6 +456,7 @@ app.patch('/api/exams/:id/end', async (req, res) => {
 });
 
 app.get('/api/exams/:id/monitoring', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
   try {
     const exam = await prisma.exam.findUnique({
       where: { id: req.params.id },
