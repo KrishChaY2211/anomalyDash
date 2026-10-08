@@ -489,3 +489,13 @@ npm run dev
 Open `http://localhost:5173` and verify the **SQLite + Prisma connected** status and database-backed exam list.
 
 > Note: the local SQLite database file is generated during setup and should not be committed to Git.
+
+## Authentication and API access
+
+- Sign-up and sign-in issue a cryptographically random, server-validated session token.
+- The frontend stores the token separately from the display profile and sends it as a Bearer token on API requests.
+- Sessions expire after seven days; signing out revokes the current session.
+- Protected API routes reject missing or expired sessions. Faculty and student endpoints enforce role and ownership checks for exams, attempts, answers, histories and monitoring records.
+- The backend build generates the Prisma client before TypeScript compilation. The development command also synchronizes the local SQLite schema.
+
+This is a lightweight MVP session mechanism. Before production deployment, use HTTPS, rate-limit authentication endpoints, add a secure session-cookie option where appropriate, and review all authorization paths with automated tests.

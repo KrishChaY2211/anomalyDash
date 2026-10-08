@@ -12,6 +12,44 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+type AuthUser = { id: string; name: string; email: string; role: 'FACULTY' | 'STUDENT'; rollNumber: string | null };
+type AuthenticatedRequest = express.Request & { authUser?: AuthUser; authToken?: string };
+
+const authUser = (req: express.Request) => (req as AuthenticatedRequest).authUser;
+const createSession = async (userId: string) => {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await prisma.session.create({ data: { token, userId, expiresAt } });
+  return token;
+};
+
+app.use(async (req, res, next) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (['/api/auth/signup', '/api/auth/signin', '/api/health', '/api/db/health'].includes(req.path)) return next();
+  const header = req.header('authorization') ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) return res.status(401).json({ message: 'Sign in required' });
+  try {
+    const session = await prisma.session.findUnique({ where: { token }, include: { user: true } });
+    if (!session || session.expiresAt <= new Date()) {
+      if (session) await prisma.session.delete({ where: { token } });
+      return res.status(401).json({ message: 'Session expired. Please sign in again.' });
+    }
+    (req as AuthenticatedRequest).authUser = {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      role: session.user.role,
+      rollNumber: session.user.rollNumber
+    };
+    (req as AuthenticatedRequest).authToken = token;
+    return next();
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not verify session' });
+  }
+});
+
 type MonitoringEventInput = { type: string; metadata: string | null; createdAt: Date };
 const parseEventMetadata = (metadata: string | null): Record<string, unknown> => {
   if (!metadata) return {};
@@ -103,7 +141,8 @@ app.post('/api/auth/signup', async (req, res) => {
       data: { name: String(name).trim(), email: normalizedEmail, passwordHash: hashPassword(String(password)), role, rollNumber: normalizedRoll },
       select: { id: true, name: true, email: true, role: true, rollNumber: true }
     });
-    return res.status(201).json({ user });
+    const token = await createSession(user.id);
+    return res.status(201).json({ user, token });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not create account' });
@@ -119,11 +158,18 @@ app.post('/api/auth/signin', async (req, res) => {
     if (!user || user.role !== role || (role === 'STUDENT' && user.rollNumber !== normalizedRoll) || !verifyPassword(String(password ?? ''), user.passwordHash)) {
       return res.status(401).json({ message: 'Invalid email, password, or role' });
     }
-    return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role, rollNumber: user.rollNumber } });
+    const token = await createSession(user.id);
+    return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role, rollNumber: user.rollNumber }, token });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not sign in' });
   }
+});
+
+app.post('/api/auth/signout', async (req, res) => {
+  const token = (req as AuthenticatedRequest).authToken;
+  if (token) await prisma.session.deleteMany({ where: { token } });
+  return res.json({ message: 'Signed out' });
 });
 
 app.get('/api/health', (_req, res) => { res.json({ status: 'ok', service: 'anomalydash-api', version: '0.2.0', phase: 'database-integration', timestamp: new Date().toISOString() }); });
@@ -136,6 +182,8 @@ app.get('/api/db/health', async (_req, res) => {
 
 app.get('/api/faculty/:facultyId/history', async (req, res) => {
   try {
+    const user = authUser(req);
+    if (user?.role !== 'FACULTY' || user.id !== req.params.facultyId) return res.status(403).json({ message: 'Faculty access required' });
     const exams = await prisma.exam.findMany({
       where: { facultyId: req.params.facultyId, status: 'COMPLETED' },
       include: {
@@ -153,6 +201,8 @@ app.get('/api/faculty/:facultyId/history', async (req, res) => {
 
 app.get('/api/students/:studentId/history', async (req, res) => {
   try {
+    const user = authUser(req);
+    if (user?.role !== 'STUDENT' || user.id !== req.params.studentId) return res.status(403).json({ message: 'Student access required' });
     const attempts = await prisma.examAttempt.findMany({
       where: { studentId: req.params.studentId, status: { in: ['SUBMITTED', 'EXPIRED'] } },
       include: { exam: { select: { id: true, title: true, subject: true, durationMin: true, status: true, faculty: { select: { name: true } } } } },
@@ -166,14 +216,18 @@ app.get('/api/students/:studentId/history', async (req, res) => {
 });
 
 app.get('/api/exams', async (req, res) => {
-  const facultyId = typeof req.query.facultyId === 'string' ? req.query.facultyId : undefined;
-  const exams = await prisma.exam.findMany({ where: facultyId ? { facultyId } : undefined, include: { faculty: true, _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
+  const user = authUser(req);
+  if (!user) return res.status(401).json({ message: 'Sign in required' });
+  const where = user.role === 'FACULTY' ? { facultyId: user.id } : { status: 'LIVE' as const };
+  const exams = await prisma.exam.findMany({ where, include: { _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
   res.json(exams);
 });
 
 app.post('/api/exams/:id/start', async (req, res) => {
   try {
+    const user = authUser(req);
     const { studentId, joinCode } = req.body;
+    if (user?.role !== 'STUDENT' || studentId !== user.id) return res.status(403).json({ message: 'You can only start your own exam attempt' });
     if (!studentId || !joinCode) return res.status(400).json({ message: 'studentId and joinCode are required' });
     const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { questions: { orderBy: { createdAt: 'asc' } } } });
     if (!exam || exam.joinCode !== String(joinCode).trim().toUpperCase()) return res.status(404).json({ message: 'Invalid test or code' });
@@ -200,8 +254,10 @@ app.post('/api/exams/:id/start', async (req, res) => {
 });
 
 app.get('/api/attempts/:id', async (req, res) => {
+  const user = authUser(req);
   const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { include: { questions: { orderBy: { createdAt: 'asc' } } } }, answers: true } });
   if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+  if (user?.role === 'STUDENT' ? attempt.studentId !== user.id : user?.role !== 'FACULTY' || attempt.exam.facultyId !== user.id) return res.status(403).json({ message: 'You cannot access this exam attempt' });
   const questions = attempt.exam.questions.map(({ answerKey, ...q }) => q);
   const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = attempt;
   return res.json({ attempt: studentAttempt, exam: { ...attempt.exam, questions } });
@@ -209,11 +265,13 @@ app.get('/api/attempts/:id', async (req, res) => {
 
 app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
   try {
+    const user = authUser(req);
     const { type, metadata } = req.body;
-    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
+    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','FOCUS_LOST','FOCUS_REGAINED','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
     if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (user?.role !== 'STUDENT' || attempt.studentId !== user.id) return res.status(403).json({ message: 'Only the student taking this exam can submit monitoring events' });
     if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is no longer active' });
     const event = await prisma.monitoringEvent.create({
       data: { attemptId: attempt.id, type: String(type), metadata: metadata ? JSON.stringify(metadata).slice(0, 500) : null }
@@ -240,11 +298,13 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
 
 app.get('/api/attempts/:id/monitoring', async (req, res) => {
   try {
+    const user = authUser(req);
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: req.params.id },
-      include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, questions: { select: { id: true } } } } }
+      include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, facultyId: true, questions: { select: { id: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (user?.role === 'STUDENT' ? attempt.studentId !== user.id : user?.role !== 'FACULTY' || attempt.exam.facultyId !== user.id) return res.status(403).json({ message: 'You cannot view this monitoring record' });
     const features = buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length);
     return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features });
   } catch (error) {
@@ -255,9 +315,11 @@ app.get('/api/attempts/:id/monitoring', async (req, res) => {
 
 app.put('/api/attempts/:id/answers', async (req, res) => {
   try {
+    const user = authUser(req);
     const { questionId, answer } = req.body;
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (user?.role !== 'STUDENT' || attempt.studentId !== user.id) return res.status(403).json({ message: 'You can only save answers for your own attempt' });
     if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is no longer active' });
     if (attempt.expiresAt <= new Date()) {
       await prisma.examAttempt.update({ where: { id: attempt.id }, data: { status: 'EXPIRED' } });
@@ -276,8 +338,10 @@ app.put('/api/attempts/:id/answers', async (req, res) => {
 
 app.post('/api/attempts/:id/submit', async (req, res) => {
   try {
+    const user = authUser(req);
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { answers: true, exam: { include: { questions: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (user?.role !== 'STUDENT' || attempt.studentId !== user.id) return res.status(403).json({ message: 'You can only submit your own attempt' });
     if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is already closed' });
     const now = new Date();
     const expired = attempt.expiresAt <= now;
@@ -295,10 +359,13 @@ app.get('/api/exams/:id', async (req, res) => {
 });
 
 app.post('/api/exams/:id/questions', async (req, res) => {
+  const user = authUser(req);
   const { type, prompt, marks, options, answerKey } = req.body;
+  if (user?.role !== 'FACULTY') return res.status(403).json({ message: 'Faculty access required' });
   if (!prompt || !marks || !['MCQ', 'DESCRIPTIVE'].includes(type)) return res.status(400).json({ message: 'type, prompt and marks are required' });
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
+  if (exam.facultyId !== user.id) return res.status(403).json({ message: 'Only the exam owner can add questions' });
   if (exam.status !== 'DRAFT') return res.status(409).json({ message: 'Questions are locked after the test is published' });
   const question = await prisma.question.create({
     data: {
@@ -315,10 +382,12 @@ app.post('/api/exams/:id/questions', async (req, res) => {
 
 app.patch('/api/exams/:id/end', async (req, res) => {
   try {
+    const user = authUser(req);
+    const user = authUser(req);
     const { facultyId } = req.body;
     const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
     if (!exam) return res.status(404).json({ message: 'Test not found' });
-    if (exam.facultyId !== String(facultyId ?? '')) return res.status(403).json({ message: 'Only the test owner can end this session' });
+    if (user?.role !== 'FACULTY' || user.id !== exam.facultyId || exam.facultyId !== String(facultyId ?? '')) return res.status(403).json({ message: 'Only the test owner can end this session' });
     if (exam.status !== 'LIVE') return res.status(409).json({ message: 'This test is not currently live' });
 
     const now = new Date();
@@ -346,7 +415,8 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       }
     });
     if (!exam) return res.status(404).json({ message: 'Test not found' });
-    if (exam.facultyId !== String(req.query.facultyId ?? '')) return res.status(403).json({ message: 'Only the exam faculty can view live monitoring' });
+    const user = authUser(req);
+    if (user?.role !== 'FACULTY' || user.id !== exam.facultyId || exam.facultyId !== String(req.query.facultyId ?? '')) return res.status(403).json({ message: 'Only the exam faculty can view live monitoring' });
     return res.json(exam.attempts.map(attempt => ({
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
@@ -360,8 +430,11 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
 });
 
 app.patch('/api/exams/:id/publish', async (req, res) => {
+  const user = authUser(req);
+  if (user?.role !== 'FACULTY') return res.status(403).json({ message: 'Faculty access required' });
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
+  if (exam.facultyId !== user.id) return res.status(403).json({ message: 'Only the exam owner can publish this test' });
   if (exam.status !== 'DRAFT') return res.status(409).json({ message: 'Only draft tests can be published' });
   if (exam._count.questions === 0) return res.status(400).json({ message: 'Add at least one question before publishing' });
   const updated = await prisma.exam.update({ where: { id: exam.id }, data: { status: 'LIVE' } });
@@ -373,7 +446,7 @@ app.delete('/api/exams/:id', async (req, res) => {
     const { facultyId } = req.body;
     const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
     if (!exam) return res.status(404).json({ message: 'Test not found' });
-    if (exam.facultyId !== String(facultyId ?? '')) return res.status(403).json({ message: 'Only the test owner can remove this test' });
+    if (user?.role !== 'FACULTY' || user.id !== exam.facultyId || exam.facultyId !== String(facultyId ?? '')) return res.status(403).json({ message: 'Only the test owner can remove this test' });
     if (exam.status !== 'COMPLETED') return res.status(409).json({ message: 'Only completed tests can be removed' });
     await prisma.exam.delete({ where: { id: exam.id } });
     return res.json({ message: 'Completed test removed' });
@@ -381,6 +454,8 @@ app.delete('/api/exams/:id', async (req, res) => {
 });
 
 app.post('/api/exams/join', async (req, res) => {
+  const user = authUser(req);
+  if (user?.role !== 'STUDENT') return res.status(403).json({ message: 'Student access required to join an exam' });
   const { testUrl, joinCode } = req.body;
   const normalizedCode = String(joinCode ?? '').trim().toUpperCase();
   if (!testUrl || !normalizedCode) return res.status(400).json({ message: 'Test URL and test code are required' });
@@ -392,7 +467,9 @@ app.post('/api/exams/join', async (req, res) => {
 });
 
 app.post('/api/exams', async (req, res) => {
+  const user = authUser(req);
   const { title, subject, durationMin, facultyId } = req.body;
+  if (user?.role !== 'FACULTY' || facultyId !== user.id) return res.status(403).json({ message: 'Only signed-in faculty can create tests for their account' });
   const lowThreshold = Number(req.body.lowThreshold ?? 30);
   const mediumThreshold = Number(req.body.mediumThreshold ?? 60);
   const highThreshold = Number(req.body.highThreshold ?? 80);
@@ -400,7 +477,7 @@ app.post('/api/exams', async (req, res) => {
   if (![lowThreshold, mediumThreshold, highThreshold].every(value => Number.isInteger(value) && value >= 1 && value <= 100) || !(lowThreshold < mediumThreshold && mediumThreshold < highThreshold)) {
     return res.status(400).json({ message: 'Thresholds must be whole numbers from 1 to 100 in ascending order: low < medium < high' });
   }
-  const faculty = facultyId ? await prisma.user.findUnique({ where: { id: facultyId } }) : await prisma.user.findFirst({ where: { role: 'FACULTY' } });
+  const faculty = await prisma.user.findUnique({ where: { id: user.id } });
   if (!faculty) return res.status(400).json({ message: 'No faculty user exists. Run npm run db:seed first.' });
   const joinCode = makeJoinCode();
   const exam = await prisma.exam.create({ data: { title: String(title).trim(), subject: String(subject).trim(), durationMin: Number(durationMin), lowThreshold, mediumThreshold, highThreshold, facultyId: faculty.id, joinCode } });

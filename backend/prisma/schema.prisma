@@ -33,6 +33,17 @@ model User {
   createdAt DateTime @default(now())
   exams     Exam[]   @relation("FacultyExams")
   attempts  ExamAttempt[]
+  sessions  Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, expiresAt])
 }
 
 model Exam {
