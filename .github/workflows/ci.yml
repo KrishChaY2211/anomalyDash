@@ -22,8 +22,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - run: npx prisma validate
-      - run: npx prisma generate
+      - run: npx prisma validate --schema=prisma/schema.production.prisma
+      - run: npx prisma generate --schema=prisma/schema.production.prisma
       - run: npm run build
       - run: npm test
 
