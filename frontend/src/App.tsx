@@ -27,6 +27,9 @@ function App() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: '', subject: '', durationMin: '60' });
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   const statusLabel = dbStatus === 'connected'
     ? 'Database connected'
@@ -93,9 +96,30 @@ function App() {
     }
   };
 
-  const handleAuth = (event: FormEvent) => {
+  const handleAuth = async (event: FormEvent) => {
     event.preventDefault();
-    navigate(role);
+    setAuthError('');
+    if (authMode === 'signup' && authForm.password !== authForm.confirmPassword) {
+      setAuthError('Passwords do not match.');
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const response = await fetch(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: authForm.name, email: authForm.email, password: authForm.password, role: role.toUpperCase() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Authentication failed');
+      localStorage.setItem('anomalydash_user', JSON.stringify(data.user));
+      setAuthForm({ name: '', email: '', password: '', confirmPassword: '' });
+      navigate(role);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Authentication failed');
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   return (
@@ -169,12 +193,12 @@ function App() {
 
             <form onSubmit={handleAuth}>
               {authMode === 'signup' && (
-                <label>Full name<input type="text" required placeholder="Enter your full name" /></label>
+                <label>Full name<input type="text" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} placeholder="Enter your full name" /></label>
               )}
-              <label>Email address<input type="email" required placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label>
-              <label>Password<input type="password" required placeholder="Enter your password" /></label>
+              <label>Email address<input type="email" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label>
+              <label>Password<input type="password" required minLength={6} value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} placeholder="Enter your password" /></label>
               {authMode === 'signup' && (
-                <label>Confirm password<input type="password" required placeholder="Confirm your password" /></label>
+                <label>Confirm password<input type="password" required minLength={6} value={authForm.confirmPassword} onChange={e => setAuthForm({...authForm, confirmPassword: e.target.value})} placeholder="Confirm your password" /></label>
               )}
               <button className="primary full" type="submit">
                 {authMode === 'signin' ? 'Sign in' : 'Create account'} as {role === 'faculty' ? 'Faculty' : 'Student'} <span>→</span>
@@ -183,8 +207,8 @@ function App() {
 
             <p className="auth-note">
               {authMode === 'signin'
-                ? 'Authentication service is the next application layer. This role-based entry flow is ready for integration.'
-                : 'Account creation UI is ready for integration with the backend authentication service.'}
+                ? 'Your account is verified against the AnomalyDash database before entering the workspace.'
+                : 'Your account details are stored in the database with a hashed password.'}
             </p>
             <button className="back-link" onClick={() => navigate('home')}>← Back to overview</button>
           </div>
