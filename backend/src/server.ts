@@ -124,10 +124,15 @@ app.post('/api/exams/:id/start', async (req, res) => {
     const student = await prisma.user.findUnique({ where: { id: String(studentId) } });
     if (!student || student.role !== 'STUDENT') return res.status(403).json({ message: 'Valid student account required' });
     const existing = await prisma.examAttempt.findUnique({ where: { examId_studentId: { examId: exam.id, studentId: student.id } }, include: { answers: true } });
-    if (existing && existing.status === 'IN_PROGRESS' && existing.expiresAt > new Date()) {
-      return res.json({ attempt: existing, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+    if (existing) {
+      if (existing.status === 'IN_PROGRESS' && existing.expiresAt > new Date()) {
+        return res.json({ attempt: existing, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+      }
+      if (existing.status === 'IN_PROGRESS') {
+        await prisma.examAttempt.update({ where: { id: existing.id }, data: { status: 'EXPIRED' } });
+      }
+      return res.status(409).json({ message: 'You have already used your attempt for this test' });
     }
-    if (existing && existing.status === 'IN_PROGRESS') await prisma.examAttempt.update({ where: { id: existing.id }, data: { status: 'EXPIRED' } });
     const startedAt = new Date();
     const expiresAt = new Date(startedAt.getTime() + exam.durationMin * 60 * 1000);
     const attempt = await prisma.examAttempt.create({ data: { examId: exam.id, studentId: student.id, startedAt, expiresAt } });
