@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { answerSimilarity, extractFeatures, scoreAnomaly } from './anomalyEngine.js';
@@ -132,7 +133,10 @@ const verifyPassword = (password: string, stored: string) => {
   return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'));
 };
 
-app.post('/api/auth/signup', async (req, res) => {
+const signupLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { message: 'Too many account creation attempts. Try again later.' } });
+const signinLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { message: 'Too many sign-in attempts. Try again later.' } });
+
+app.post('/api/auth/signup', signupLimiter, async (req, res) => {
   try {
     const { name, email, password, role, rollNumber } = req.body;
     const normalizedEmail = String(email ?? '').trim().toLowerCase();
@@ -160,7 +164,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-app.post('/api/auth/signin', async (req, res) => {
+app.post('/api/auth/signin', signinLimiter, async (req, res) => {
   try {
     const { email, password, role, rollNumber } = req.body;
     const normalizedEmail = String(email ?? '').trim().toLowerCase();
