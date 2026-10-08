@@ -201,7 +201,10 @@ function App() {
       setActiveExam(data.exam);
       setAnswers(Object.fromEntries((data.attempt.answers || []).map((a: any) => [a.questionId, a.answer])));
       setRemainingSeconds(Math.max(0, Math.floor((new Date(data.attempt.expiresAt).getTime() - Date.now()) / 1000)));
-      navigate('exam');
+      // Enter the exam view directly without triggering the hashchange listener.
+      window.history.replaceState(null, '', '#/exam');
+      setView('exam');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) { setExamError(error instanceof Error ? error.message : 'Could not start exam'); }
     finally { setExamLoading(false); }
   };
