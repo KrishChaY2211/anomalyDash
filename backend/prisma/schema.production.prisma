@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  FACULTY
+  STUDENT
+}
+
+enum ExamStatus {
+  DRAFT
+  LIVE
+  COMPLETED
+}
+
+enum QuestionType {
+  MCQ
+  DESCRIPTIVE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  passwordHash String
+  rollNumber String? @unique
+  role      UserRole
+  createdAt DateTime @default(now())
+  exams     Exam[]   @relation("FacultyExams")
+  attempts  ExamAttempt[]
+}
+
+model Exam {
+  id          String      @id @default(cuid())
+  title       String
+  subject     String
+  durationMin Int
+  lowThreshold Int @default(30)
+  mediumThreshold Int @default(60)
+  highThreshold Int @default(80)
+  joinCode    String?     @unique
+  accessUrl   String?
+  status      ExamStatus  @default(DRAFT)
+  facultyId   String
+  faculty     User        @relation("FacultyExams", fields: [facultyId], references: [id])
+  questions   Question[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  attempts    ExamAttempt[]
+}
+
+model Question {
+  id         String       @id @default(cuid())
+  examId     String
+  exam       Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  type       QuestionType
+  prompt     String
+  marks      Int
+  options    String?
+  answerKey  String?
+  createdAt  DateTime     @default(now())
+  attemptAnswers AttemptAnswer[]
+}
+
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+}
+
+enum AnomalyLevel {
+  CLEAR
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model ExamAttempt {
+  id          String        @id @default(cuid())
+  examId      String
+  studentId   String
+  startedAt   DateTime      @default(now())
+  expiresAt   DateTime
+  submittedAt DateTime?
+  status      AttemptStatus @default(IN_PROGRESS)
+  score       Int?
+  anomalyScore Int @default(0)
+  anomalyLevel AnomalyLevel @default(CLEAR)
+  exam        Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student     User          @relation(fields: [studentId], references: [id])
+  answers     AttemptAnswer[]
+  monitoringEvents MonitoringEvent[]
+  @@unique([examId, studentId])
+}
+
+model AttemptAnswer {
+  id         String      @id @default(cuid())
+  attemptId  String
+  questionId String
+  answer     String
+  updatedAt  DateTime    @updatedAt
+  attempt    ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  @@unique([attemptId, questionId])
+}
+
+
+model MonitoringEvent {
+  id        String      @id @default(cuid())
+  attemptId String
+  type      String
+  metadata  String?
+  createdAt DateTime    @default(now())
+  attempt   ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  @@index([attemptId, createdAt])
+}
