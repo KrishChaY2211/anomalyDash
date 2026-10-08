@@ -28,6 +28,7 @@ model User {
   name      String
   email     String   @unique
   passwordHash String
+  rollNumber String? @unique
   role      UserRole
   createdAt DateTime @default(now())
   exams     Exam[]   @relation("FacultyExams")
