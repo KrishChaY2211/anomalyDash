@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "prisma generate && prisma db push && tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
