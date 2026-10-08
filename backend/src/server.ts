@@ -12,6 +12,62 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+type MonitoringEventInput = { type: string; metadata: string | null; createdAt: Date };
+const parseEventMetadata = (metadata: string | null): Record<string, unknown> => {
+  if (!metadata) return {};
+  try {
+    const value = JSON.parse(metadata);
+    return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  } catch { return {}; }
+};
+
+const buildMonitoringFeatures = (
+  events: MonitoringEventInput[],
+  questionCount = 0,
+  answeredQuestionCount = 0
+) => {
+  const counts: Record<string, number> = {};
+  const awayDurations: number[] = [];
+  const firstResponseTimes: number[] = [];
+  for (const event of events) {
+    counts[event.type] = (counts[event.type] ?? 0) + 1;
+    const metadata = parseEventMetadata(event.metadata);
+    const awayDuration = Number(metadata.awayDurationMs ?? 0);
+    if (event.type === 'TAB_VISIBLE' && Number.isFinite(awayDuration) && awayDuration > 0) awayDurations.push(awayDuration);
+    if (event.type === 'ANSWER_CHANGED' && metadata.firstResponse === true) {
+      const responseTime = Number(metadata.responseTimeMs);
+      if (Number.isFinite(responseTime) && responseTime >= 0) firstResponseTimes.push(responseTime);
+    }
+  }
+  const totalAwayMs = awayDurations.reduce((sum, value) => sum + value, 0);
+  const maxAwayMs = awayDurations.length ? Math.max(...awayDurations) : 0;
+  const averageResponseMs = firstResponseTimes.length
+    ? firstResponseTimes.reduce((sum, value) => sum + value, 0) / firstResponseTimes.length
+    : 0;
+  const responseTimeDeviationMs = firstResponseTimes.length
+    ? Math.sqrt(firstResponseTimes.reduce((sum, value) => sum + Math.pow(value - averageResponseMs, 2), 0) / firstResponseTimes.length)
+    : 0;
+  return {
+    tabSwitchCount: counts.TAB_HIDDEN ?? 0,
+    focusLossCount: counts.WINDOW_BLUR ?? 0,
+    totalAwayMs,
+    maxAwayMs,
+    pasteCount: counts.PASTE ?? 0,
+    answerChangeCount: counts.ANSWER_CHANGED ?? 0,
+    averageResponseMs: Math.round(averageResponseMs),
+    responseTimeDeviationMs: Math.round(responseTimeDeviationMs),
+    skippedQuestionCount: counts.SKIPPED_QUESTION ?? 0,
+    answeredQuestionCount,
+    unansweredQuestionCount: Math.max(0, questionCount - answeredQuestionCount),
+    offlineCount: counts.OFFLINE ?? 0,
+    onlineCount: counts.ONLINE ?? 0,
+    tabVisibleCount: counts.TAB_VISIBLE ?? 0,
+    answerStartedCount: counts.ANSWER_STARTED ?? 0,
+    answerSubmittedCount: counts.ANSWER_SUBMITTED ?? 0,
+    eventCounts: counts
+  };
+};
+
 
 const hashPassword = (password: string) => {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -153,7 +209,7 @@ app.get('/api/attempts/:id', async (req, res) => {
 app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
   try {
     const { type, metadata } = req.body;
-    const allowed = ['TAB_HIDDEN','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT'];
+    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
     if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
@@ -185,10 +241,11 @@ app.get('/api/attempts/:id/monitoring', async (req, res) => {
   try {
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: req.params.id },
-      include: { monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 50 }, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true } } }
+      include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, questions: { select: { id: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
-    return res.json({ attemptId: attempt.id, student: attempt.student, exam: attempt.exam, events: attempt.monitoringEvents });
+    const features = buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length);
+    return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not load monitoring data' });
@@ -282,7 +339,7 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       where: { id: req.params.id },
       include: {
         attempts: {
-          include: { student: { select: { name: true, rollNumber: true } }, monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 8 } },
+          include: { student: { select: { name: true, rollNumber: true } }, monitoringEvents: { orderBy: { createdAt: 'desc' } }, answers: true, exam: { select: { questions: { select: { id: true } } } } },
           orderBy: { startedAt: 'desc' }
         }
       }
@@ -292,7 +349,8 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
     return res.json(exam.attempts.map(attempt => ({
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
-      startedAt: attempt.startedAt, events: attempt.monitoringEvents
+      startedAt: attempt.startedAt, events: attempt.monitoringEvents.slice(0, 8),
+      features: buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length)
     })).sort((a, b) => b.anomalyScore - a.anomalyScore || b.startedAt.getTime() - a.startedAt.getTime()));
   } catch (error) {
     console.error(error);
