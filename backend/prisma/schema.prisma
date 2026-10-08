@@ -27,6 +27,7 @@ model User {
   id        String   @id @default(cuid())
   name      String
   email     String   @unique
+  passwordHash String
   role      UserRole
   createdAt DateTime @default(now())
   exams     Exam[]   @relation("FacultyExams")
