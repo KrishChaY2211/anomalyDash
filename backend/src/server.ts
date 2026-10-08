@@ -272,6 +272,53 @@ app.put('/api/attempts/:id/answers', async (req, res) => {
   } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not save answer' }); }
 });
 
+app.get('/api/attempts/:id/similarity', async (req, res) => {
+  try {
+    const attempt = await prisma.examAttempt.findUnique({
+      where: { id: req.params.id },
+      include: { answers: true, exam: { include: { questions: { select: { id: true, type: true } } } } }
+    });
+    if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+
+    const comparableAttempts = await prisma.examAttempt.findMany({
+      where: {
+        examId: attempt.examId,
+        id: { not: attempt.id },
+        status: { in: ['SUBMITTED', 'EXPIRED'] }
+      },
+      include: { answers: true }
+    });
+    const questionTypes = new Map(attempt.exam.questions.map(question => [question.id, question.type]));
+    const results = attempt.answers
+      .filter(answer => answer.answer.trim().length >= 20 && questionTypes.get(answer.questionId) === 'DESCRIPTIVE')
+      .map(answer => {
+        const comparisons = comparableAttempts
+          .map(other => {
+            const otherAnswer = other.answers.find(candidate => candidate.questionId === answer.questionId);
+            return otherAnswer && otherAnswer.answer.trim().length >= 20
+              ? { similarityPercent: answerSimilarity(answer.answer, otherAnswer.answer) }
+              : null;
+          })
+          .filter((item): item is { similarityPercent: number } => item !== null);
+        const maxSimilarityPercent = comparisons.reduce((max, item) => Math.max(max, item.similarityPercent), 0);
+        return {
+          questionId: answer.questionId,
+          maxSimilarityPercent,
+          comparedAnswerCount: comparisons.length,
+          reviewSuggested: maxSimilarityPercent >= 70
+        };
+      });
+    return res.json({
+      attemptId: attempt.id,
+      results,
+      note: 'Token overlap is a basic screening signal, not proof of copied work. Short answers are excluded and faculty should review context.'
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not calculate answer similarity' });
+  }
+});
+
 app.post('/api/attempts/:id/submit', async (req, res) => {
   try {
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { answers: true, exam: { include: { questions: true } } } });
