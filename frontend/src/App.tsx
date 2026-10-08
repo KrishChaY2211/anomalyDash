@@ -65,9 +65,10 @@ function App() {
   const statusLabel = dbStatus === 'connected' ? 'Database connected' : dbStatus === 'checking' ? 'Checking database' : 'Database offline';
 
   const navigate = (nextView: View) => {
-    window.location.hash = nextView === 'home' ? '' : nextView;
+    const nextHash = nextView === 'home' ? '' : '#/' + nextView;
+    window.history.pushState(null, '', nextHash);
     setView(nextView);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo(0, 0);
   };
 
   const openAuth = (mode: AuthMode) => { setAuthMode(mode); navigate('login'); };
@@ -84,9 +85,9 @@ function App() {
 
   useEffect(() => {
     void loadData();
-    const onHashChange = () => setView(getInitialView());
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    const onPopState = () => setView(getInitialView());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, [currentUser?.id, currentUser?.role]);
 
   const createExam = async (event?: FormEvent) => {
@@ -103,7 +104,8 @@ function App() {
       if (!response.ok) throw new Error(data.message || 'Could not create test');
       setForm({ title: '', subject: '', durationMin: '60' });
       setSelectedExam(data);
-      await loadData();
+      setExams(prev => [data, ...prev.filter(exam => exam.id !== data.id)]);
+      void loadData();
     } catch (error) { setDbStatus('offline'); alert(error instanceof Error ? error.message : 'Could not create test'); }
     finally { setCreating(false); }
   };
@@ -120,8 +122,10 @@ function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not add question');
       setQuestionForm({ type: 'MCQ', prompt: '', marks: '1', options: '', answerKey: '' });
-      setSelectedExam({ ...selectedExam, _count: { questions: (selectedExam._count?.questions || 0) + 1 } });
-      await loadData();
+      const updatedExam = { ...selectedExam, _count: { questions: (selectedExam._count?.questions || 0) + 1 } };
+      setSelectedExam(updatedExam);
+      setExams(prev => prev.map(exam => exam.id === selectedExam.id ? updatedExam : exam));
+      void loadData();
     } catch (error) { alert(error instanceof Error ? error.message : 'Could not add question'); }
     finally { setAddingQuestion(false); }
   };
@@ -138,8 +142,10 @@ function App() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not end live session');
-      setSelectedExam({ ...selectedExam, status: 'COMPLETED' });
-      await loadData();
+      const updatedExam = { ...selectedExam, status: 'COMPLETED' };
+      setSelectedExam(updatedExam);
+      setExams(prev => prev.map(exam => exam.id === selectedExam.id ? updatedExam : exam));
+      void loadData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Could not end live session');
     } finally {
@@ -154,8 +160,10 @@ function App() {
       const response = await fetch(`/api/exams/${selectedExam.id}/publish`, { method: 'PATCH' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not publish test');
-      setSelectedExam({ ...selectedExam, status: 'LIVE' });
-      await loadData();
+      const updatedExam = { ...selectedExam, status: 'LIVE' };
+      setSelectedExam(updatedExam);
+      setExams(prev => prev.map(exam => exam.id === selectedExam.id ? updatedExam : exam));
+      void loadData();
     } catch (error) { alert(error instanceof Error ? error.message : 'Could not publish test'); }
     finally { setPublishing(false); }
   };
@@ -207,9 +215,9 @@ function App() {
       setAnswers(Object.fromEntries((data.attempt.answers || []).map((a: any) => [a.questionId, a.answer])));
       setRemainingSeconds(Math.max(0, Math.floor((new Date(data.attempt.expiresAt).getTime() - Date.now()) / 1000)));
       // Enter the exam view directly without triggering the hashchange listener.
-      window.history.replaceState(null, '', '#/exam');
+      window.history.pushState(null, '', '#/exam');
       setView('exam');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      window.scrollTo(0, 0);
     } catch (error) { setExamError(error instanceof Error ? error.message : 'Could not start exam'); }
     finally { setExamLoading(false); }
   };
