@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 
-type View = 'home' | 'faculty' | 'student';
+type View = 'home' | 'login' | 'faculty' | 'student';
+type Role = 'faculty' | 'student';
 
 type Exam = {
   id: string;
@@ -20,7 +21,7 @@ const pipeline = [
 
 function getInitialView(): View {
   const hash = window.location.hash.replace('#/', '');
-  return hash === 'faculty' || hash === 'student' ? hash : 'home';
+  return hash === 'faculty' || hash === 'student' || hash === 'login' ? hash : 'home';
 }
 
 function App() {
@@ -85,7 +86,9 @@ function App() {
     }
   };
 
-  const statusLabel = dbStatus === 'connected' ? 'Database connected' : dbStatus === 'checking' ? 'Checking database' : 'Database offline';
+  const chooseRole = (nextRole: Role) => { setRole(nextRole); navigate('login'); };
+
+  const handleLogin = (event: FormEvent) => { event.preventDefault(); navigate(role); };
 
   return (
     <main className="app-shell">
@@ -107,55 +110,64 @@ function App() {
           <section className="hero">
             <div className="hero-copy">
               <div className="eyebrow">INTELLIGENT EXAMINATION MONITORING</div>
-              <h1>See the exam.<br /><em>Understand the anomalies.</em></h1>
-              <p>A professional online examination platform that turns meaningful examination behaviour and answering patterns into explainable signals for faculty review.</p>
+              <h1>Exams, made<br /><em>more intelligent.</em></h1>
+              <p>AnomalyDash helps colleges conduct online examinations while turning unusual behaviour and answering patterns into explainable signals for faculty review.</p>
               <div className="hero-actions">
-                <button className="primary" onClick={() => navigate('faculty')}>Continue as Faculty <span>→</span></button>
-                <button className="secondary" onClick={() => navigate('student')}>Preview Student Portal</button>
+                <button className="primary" onClick={() => navigate('login')}>Sign in to AnomalyDash <span>→</span></button>
+                <button className="secondary" onClick={() => chooseRole('student')}>Student access</button>
               </div>
               <div className="trust-line"><span>●</span> Faculty stays in control · Minimum-data monitoring · No webcam required</div>
             </div>
-
-            <div className="hero-card">
-              <div className="card-header">
-                <div><span className="label">LIVE EXAM PREVIEW</span><h3>Computer Networks — Mid Term</h3></div>
-                <span className="live-pill"><i /> LIVE</span>
+            <div className="hero-visual">
+              <div className="visual-orbit orbit-one" /><div className="visual-orbit orbit-two" />
+              <div className="signal-card">
+                <div className="signal-top"><span className="label">ANOMALY INTELLIGENCE</span><span className="signal-live">SYSTEM READY</span></div>
+                <div className="signal-score"><strong>86</strong><span>anomaly<br />score</span></div>
+                <div className="signal-bars"><i /><i /><i /><i /><i /></div>
+                <div className="signal-evidence"><span>Behaviour deviation</span><b>Detected</b></div>
+                <div className="signal-evidence"><span>Answering pattern</span><b>Reviewed</b></div>
+                <div className="signal-evidence"><span>Faculty decision</span><b>In control</b></div>
               </div>
-              <div className="mini-stats">
-                <div><strong>42</strong><span>Students</span></div><div><strong>03</strong><span>Need attention</span></div><div><strong>00:48</strong><span>Remaining</span></div>
-              </div>
-              <div className="student-row danger"><div className="avatar">24</div><div className="student-info"><strong>Roll 24</strong><span>Multiple signals detected</span></div><b>86</b></div>
-              <div className="student-row warning"><div className="avatar">17</div><div className="student-info"><strong>Roll 17</strong><span>Attention required</span></div><b>47</b></div>
-              <div className="student-row normal"><div className="avatar">08</div><div className="student-info"><strong>Roll 08</strong><span>Behaviour within baseline</span></div><b>12</b></div>
-              <div className="card-footer">Scores are decision-support signals, not proof of misconduct.</div>
+              <div className="visual-caption">Behaviour + Answering Pattern → Anomaly Detection → Faculty Intelligence</div>
             </div>
           </section>
-
-          <section className="workspace">
-            <div className="section-heading">
-              <div><span className="eyebrow">PHASE 02 · DATABASE</span><h2>Persistent application data is now live.</h2></div>
-              <span className="role-badge">{examCount} persisted exam{examCount === 1 ? '' : 's'}</span>
-            </div>
-            <div className="db-panel">
-              <div>
-                <span className="label">DATABASE STATUS</span>
-                <h3>{dbStatus === 'connected' ? 'SQLite + Prisma connected' : 'Start the backend to connect'}</h3>
-                <p>The application now has a real UI → API → database loop.</p>
-              </div>
-              <button className="secondary" onClick={() => navigate('faculty')}>Open Faculty Workspace →</button>
-            </div>
-            <div className="pipeline">
-              {pipeline.map(([number, title, description]) => <article className="pipeline-card" key={number}><span>{number}</span><h3>{title}</h3><p>{description}</p></article>)}
+          <section className="overview-grid">
+            <article className="overview-card featured"><span className="card-number">01</span><h2>Conduct exams normally.</h2><p>Questions, marks, duration and student responses live inside one structured examination workflow.</p></article>
+            <article className="overview-card"><span className="card-number">02</span><h2>Observe meaningful signals.</h2><p>Focus changes, visibility events, timing shifts and paste metadata are captured without webcam or microphone surveillance.</p></article>
+            <article className="overview-card"><span className="card-number">03</span><h2>Investigate, don't assume.</h2><p>Combined evidence highlights unusual sessions while keeping the final decision with faculty.</p></article>
+          </section>
+          <section className="access-section">
+            <div><span className="eyebrow">SECURE ROLE-BASED ACCESS</span><h2>Who are you signing in as?</h2><p>Choose your role to enter the appropriate AnomalyDash workspace.</p></div>
+            <div className="role-cards">
+              <button className="role-card" onClick={() => chooseRole('faculty')}><span>FACULTY</span><strong>Manage examinations</strong><p>Create exams, monitor sessions and review anomaly evidence.</p><b>Faculty sign in →</b></button>
+              <button className="role-card" onClick={() => chooseRole('student')}><span>STUDENT</span><strong>Take examinations</strong><p>Access assigned examinations and submit answers securely.</p><b>Student sign in →</b></button>
             </div>
           </section>
         </>
+      )}
+
+      {view === 'login' && (
+        <section className="auth-page">
+          <div className="auth-card">
+            <span className="eyebrow">ANOMALYDASH ACCESS</span><h1>Sign in</h1>
+            <p className="auth-subtitle">Continue as {role === 'faculty' ? 'Faculty' : 'Student'} to open your workspace.</p>
+            <div className="role-switch"><button className={role === 'faculty' ? 'selected' : ''} onClick={() => setRole('faculty')}>Faculty</button><button className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}>Student</button></div>
+            <form onSubmit={handleLogin}>
+              <label>Email address<input type="email" required placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label>
+              <label>Password<input type="password" required placeholder="Enter your password" /></label>
+              <button className="primary full" type="submit">Continue as {role === 'faculty' ? 'Faculty' : 'Student'} <span>→</span></button>
+            </form>
+            <p className="auth-note">Authentication service is the next application layer. This role-based entry flow is ready for integration.</p>
+            <button className="back-link" onClick={() => navigate('home')}>← Back to overview</button>
+          </div>
+        </section>
       )}
 
       {view === 'faculty' && (
         <section className="page workspace">
           <div className="page-heading">
             <div>
-              <span className="eyebrow">FACULTY WORKSPACE · PHASE 02</span>
+              <span className="eyebrow">FACULTY WORKSPACE</span>
               <h1>Exam management</h1>
               <p>Create and inspect persisted exams. Monitoring and anomaly controls will build on this workspace in later phases.</p>
             </div>
@@ -190,9 +202,9 @@ function App() {
         <section className="page workspace">
           <div className="page-heading">
             <div>
-              <span className="eyebrow">STUDENT PORTAL · PHASE 02</span>
+              <span className="eyebrow">STUDENT PORTAL</span>
               <h1>Available examinations</h1>
-              <p>This preview reads real exam records from the database. Authentication and the examination experience are next-phase work.</p>
+              <p>Access examinations assigned to your student account.</p>
             </div>
             <button className="secondary" onClick={() => navigate('home')}>← Overview</button>
           </div>
