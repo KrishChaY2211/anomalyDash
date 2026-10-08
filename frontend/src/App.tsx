@@ -306,7 +306,7 @@ function App() {
     fullscreenStarted.current = Boolean(document.fullscreenElement);
     const onVisibility = () => {
       if (document.hidden) {
-        awayStartedAt.current = Date.now();
+        if (awayStartedAt.current === null) awayStartedAt.current = Date.now();
         void recordMonitoringEvent('TAB_HIDDEN');
       } else {
         const awayDurationMs = awayStartedAt.current === null ? 0 : Math.max(0, Date.now() - awayStartedAt.current);
@@ -316,12 +316,12 @@ function App() {
     };
     const onBlur = () => {
       if (awayStartedAt.current === null) awayStartedAt.current = Date.now();
-      void recordMonitoringEvent('WINDOW_BLUR');
+      void recordMonitoringEvent('FOCUS_LOST');
     };
     const onFocus = () => {
       const awayDurationMs = awayStartedAt.current === null ? 0 : Math.max(0, Date.now() - awayStartedAt.current);
       awayStartedAt.current = null;
-      void recordMonitoringEvent('WINDOW_FOCUS', { awayDurationMs });
+      void recordMonitoringEvent('FOCUS_REGAINED', { awayDurationMs });
     };
     const onPaste = () => void recordMonitoringEvent('PASTE');
     const onCopy = () => void recordMonitoringEvent('COPY');
