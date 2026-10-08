@@ -69,7 +69,7 @@ function App() {
     const onHashChange = () => setView(getInitialView());
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+  }, [currentUser?.id, currentUser?.role]);
 
   const createExam = async (event?: FormEvent) => {
     event?.preventDefault();
