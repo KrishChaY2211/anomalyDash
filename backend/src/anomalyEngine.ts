@@ -116,7 +116,7 @@ export function scoreAnomaly(events: EventRecord[], thresholds: Thresholds) {
 
   const rawScore = factors.reduce((sum, factor) => sum + factor.contribution, 0);
   const score = Math.max(0, Math.min(100, Math.round(rawScore)));
-  const anomalyLevel = score >= thresholds.highThreshold ? 'HIGH'
+  const anomalyLevel: 'CLEAR' | 'LOW' | 'MEDIUM' | 'HIGH' = score >= thresholds.highThreshold ? 'HIGH'
     : score >= thresholds.mediumThreshold ? 'MEDIUM'
     : score >= thresholds.lowThreshold ? 'LOW' : 'CLEAR';
   return {
