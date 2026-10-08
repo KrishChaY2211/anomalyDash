@@ -247,3 +247,44 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
 .app-shell:not(.theme-dark) .monitor-level { color:var(--muted); }
 .app-shell:not(.theme-dark) .history-attempt { background:var(--surface-soft); border-color:var(--line); }
 .app-shell:not(.theme-dark) .published-lock-note { color:var(--muted); border-color:var(--line); }
+
+
+/* Floating accessibility control: keeps the primary navigation unchanged. */
+.app-shell .accessibility-wrap {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 1000;
+}
+.app-shell .accessibility-trigger {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--line, #d8deea);
+  border-radius: 50%;
+  background: var(--surface, #fff);
+  color: var(--text, #20283a);
+  box-shadow: 0 5px 20px rgba(20, 30, 55, .16);
+  cursor: pointer;
+  transition: transform .2s ease, box-shadow .2s ease, background .25s ease;
+}
+.app-shell .accessibility-trigger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(20, 30, 55, .22);
+}
+.app-shell .accessibility-trigger:focus-visible {
+  outline: 3px solid #6478ff;
+  outline-offset: 3px;
+}
+.app-shell .accessibility-panel {
+  position: absolute;
+  top: auto;
+  bottom: calc(100% + 12px);
+  right: 0;
+  max-width: calc(100vw - 32px);
+}
+@media (max-width: 560px) {
+  .app-shell .accessibility-wrap { right: 14px; bottom: 14px; }
+}
