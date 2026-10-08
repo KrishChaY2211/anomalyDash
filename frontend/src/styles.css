@@ -311,3 +311,67 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
 .app-shell .evidence-panel li p { margin:4px 0 0; overflow-wrap:anywhere; }
 .app-shell .evidence-disclaimer { margin:8px 0 0; }
 @media (max-width:560px) { .app-shell .threshold-config { grid-template-columns:1fr; } }
+
+
+/* Improved question authoring and one-question-at-a-time exam navigation */
+.app-shell .mcq-option-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 4px 0 2px;
+}
+.app-shell .mcq-option-fields > .field-label {
+  grid-column: 1 / -1;
+  color: var(--text);
+  font-weight: 650;
+  font-size: 13px;
+}
+.app-shell .mcq-option-fields label {
+  min-width: 0;
+}
+.app-shell .form-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: -4px 0 8px;
+}
+.app-shell .exam-progress {
+  display: grid;
+  grid-template-columns: auto minmax(70px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 20px 0;
+}
+.app-shell .exam-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border);
+}
+.app-shell .exam-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+.app-shell .exam-question-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 18px 0 28px;
+  flex-wrap: wrap;
+}
+.app-shell .exam-question-nav > span {
+  color: var(--muted);
+  font-size: 13px;
+  flex: 1;
+  text-align: center;
+}
+@media (max-width: 560px) {
+  .app-shell .mcq-option-fields { grid-template-columns: 1fr; }
+  .app-shell .exam-progress { grid-template-columns: 1fr auto; }
+  .app-shell .exam-progress-track { grid-column: 1 / -1; grid-row: 2; }
+  .app-shell .exam-question-nav > span { order: 3; flex-basis: 100%; }
+}
