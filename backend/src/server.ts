@@ -77,6 +77,37 @@ app.get('/api/db/health', async (_req, res) => {
   } catch (error) { console.error(error); res.status(503).json({ status: 'disconnected', database: 'sqlite' }); }
 });
 
+app.get('/api/faculty/:facultyId/history', async (req, res) => {
+  try {
+    const exams = await prisma.exam.findMany({
+      where: { facultyId: req.params.facultyId, status: 'COMPLETED' },
+      include: {
+        _count: { select: { questions: true } },
+        attempts: { include: { student: { select: { id: true, name: true, email: true, rollNumber: true } } }, orderBy: { startedAt: 'desc' } }
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+    return res.json(exams);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not load faculty history' });
+  }
+});
+
+app.get('/api/students/:studentId/history', async (req, res) => {
+  try {
+    const attempts = await prisma.examAttempt.findMany({
+      where: { studentId: req.params.studentId, status: { in: ['SUBMITTED', 'EXPIRED'] } },
+      include: { exam: { select: { id: true, title: true, subject: true, durationMin: true, status: true, faculty: { select: { name: true } } } } },
+      orderBy: { submittedAt: 'desc' }
+    });
+    return res.json(attempts);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not load student history' });
+  }
+});
+
 app.get('/api/exams', async (req, res) => {
   const facultyId = typeof req.query.facultyId === 'string' ? req.query.facultyId : undefined;
   const exams = await prisma.exam.findMany({ where: facultyId ? { facultyId } : undefined, include: { faculty: true, _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
