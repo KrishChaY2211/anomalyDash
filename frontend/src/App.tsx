@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 
 type View = 'home' | 'login' | 'faculty' | 'student' | 'exam' | 'faculty-history' | 'student-history' | 'faculty-monitoring';
 type Role = 'faculty' | 'student';
@@ -32,6 +32,9 @@ function getInitialView(): View {
 
 function App() {
   const [view, setView] = useState<View>(getInitialView);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [accessibilityOpen, setAccessibilityOpen] = useState(false);
+  const [fontScale, setFontScale] = useState(1);
   const [role, setRole] = useState<Role>('student');
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
   const [dbStatus, setDbStatus] = useState('checking');
@@ -399,7 +402,7 @@ function App() {
   const logout = () => { localStorage.removeItem('anomalydash_user'); setCurrentUser(null); navigate('home'); };
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell theme-${theme}`} style={{ '--font-scale': fontScale } as CSSProperties}>
       <nav className="topbar">
         <button className="brand brand-button" onClick={() => navigate('home')}><div className="brand-mark">A/</div><div><strong>AnomalyDash</strong><span>by CodeMatriX</span></div></button>
         <div className="nav-actions">
@@ -407,6 +410,16 @@ function App() {
           {currentUser?.role === 'FACULTY' && <><button className={`nav-link ${view === 'faculty' ? 'active' : ''}`} onClick={() => navigate('faculty')}>Faculty</button><button className={`nav-link ${view === 'faculty-monitoring' ? 'active' : ''}`} onClick={() => navigate('faculty-monitoring')}>Live Monitoring</button><button className={`nav-link ${view === 'faculty-history' ? 'active' : ''}`} onClick={() => { navigate('faculty-history'); void loadFacultyHistory(); }}>History</button></>}
           {currentUser?.role === 'STUDENT' && <><button className={`nav-link ${view === 'student' ? 'active' : ''}`} onClick={() => navigate('student')}>Student</button><button className={`nav-link ${view === 'student-history' ? 'active' : ''}`} onClick={() => { navigate('student-history'); void loadStudentHistory(); }}>Past Exams</button></>}
           {currentUser && <button className="nav-link" onClick={logout}>Sign out</button>}
+        </div>
+        <div className="accessibility-wrap">
+          <button type="button" className="accessibility-trigger" aria-expanded={accessibilityOpen} aria-controls="accessibility-panel" onClick={() => setAccessibilityOpen(open => !open)}>
+            <span aria-hidden="true">◐</span> Accessibility
+          </button>
+          {accessibilityOpen && <section className="accessibility-panel" id="accessibility-panel" aria-label="Accessibility settings">
+            <div className="accessibility-panel-heading"><strong>Accessibility</strong><button type="button" className="accessibility-close" aria-label="Close accessibility settings" onClick={() => setAccessibilityOpen(false)}>×</button></div>
+            <div className="accessibility-setting"><div><strong>Light theme</strong><span>Switch the website appearance</span></div><button type="button" role="switch" aria-label="Light theme" aria-checked={theme === 'light'} className={`theme-switch ${theme === 'light' ? 'is-light' : ''}`} onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')}><span /></button></div>
+            <div className="accessibility-setting font-setting"><div><strong>Text size</strong><span>Adjust text across the website</span></div><div className="font-controls"><button type="button" aria-label="Decrease font size" disabled={fontScale <= 0.9} onClick={() => setFontScale(size => Math.max(0.9, Math.round((size - 0.1) * 10) / 10))}>A−</button><span>{Math.round(fontScale * 100)}%</span><button type="button" aria-label="Increase font size" disabled={fontScale >= 1.3} onClick={() => setFontScale(size => Math.min(1.3, Math.round((size + 0.1) * 10) / 10))}>A+</button></div></div>
+          </section>}
         </div>
       </nav>
 
