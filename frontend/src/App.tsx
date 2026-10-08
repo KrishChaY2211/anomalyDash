@@ -77,6 +77,7 @@ function App() {
   const questionFirstResponseRecorded = useRef<Record<string, boolean>>({});
   const questionStartedEvents = useRef<Record<string, boolean>>({});
   const answerValues = useRef<Record<string, string>>({});
+  const pendingMonitoringEvents = useRef<Array<{ type: string; metadata?: Record<string, unknown> }>>([]);
   const [facultyHistory, setFacultyHistory] = useState<any[]>([]);
   const [studentHistory, setStudentHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -254,6 +255,7 @@ function App() {
       questionFirstResponseRecorded.current = {};
       questionStartedEvents.current = {};
       awayStartedAt.current = null;
+      pendingMonitoringEvents.current = [];
       setRemainingSeconds(Math.max(0, Math.floor((new Date(data.attempt.expiresAt).getTime() - Date.now()) / 1000)));
       setAnomalyScore(data.attempt.anomalyScore || 0);
       setAnomalyLevel(data.attempt.anomalyLevel || 'CLEAR');
@@ -276,7 +278,21 @@ function App() {
       const data = await response.json();
       setAnomalyScore(data.anomalyScore ?? 0);
       setAnomalyLevel(data.anomalyLevel ?? 'CLEAR');
-    } catch { /* monitoring must never interrupt the exam */ }
+      if (type === 'ONLINE' && pendingMonitoringEvents.current.length > 0) {
+        const queued = pendingMonitoringEvents.current.splice(0);
+        for (const pending of queued) {
+          try {
+            await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(pending)
+            });
+          } catch { pendingMonitoringEvents.current.push(pending); break; }
+        }
+      }
+    } catch {
+      if (type !== 'ONLINE') pendingMonitoringEvents.current.push({ type, metadata });
+      /* Monitoring must never interrupt the exam. Failed events are queued for reconnection. */
+    }
   };
 
   useEffect(() => {
