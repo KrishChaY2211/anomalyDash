@@ -279,6 +279,7 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       }
     });
     if (!exam) return res.status(404).json({ message: 'Test not found' });
+    if (exam.facultyId !== String(req.query.facultyId ?? '')) return res.status(403).json({ message: 'Only the exam faculty can view live monitoring' });
     return res.json(exam.attempts.map(attempt => ({
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
