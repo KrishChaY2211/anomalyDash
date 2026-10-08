@@ -210,7 +210,7 @@ app.get('/api/attempts/:id', async (req, res) => {
 app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
   try {
     const { type, metadata } = req.body;
-    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
+    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','FOCUS_LOST','FOCUS_REGAINED','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
     if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
