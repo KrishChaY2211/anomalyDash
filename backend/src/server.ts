@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 const app = express();
+const makeJoinCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 const port = Number(process.env.PORT ?? 4000);
 const prisma = new PrismaClient();
 
@@ -81,13 +82,33 @@ app.get('/api/exams', async (_req, res) => {
   res.json(exams);
 });
 
+app.get('/api/exams/:id', async (req, res) => {
+  const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
+  if (!exam) return res.status(404).json({ message: 'Test not found' });
+  return res.json(exam);
+});
+
+app.post('/api/exams/join', async (req, res) => {
+  const { testUrl, joinCode } = req.body;
+  const normalizedCode = String(joinCode ?? '').trim().toUpperCase();
+  if (!testUrl || !normalizedCode) return res.status(400).json({ message: 'Test URL and test code are required' });
+  const examId = String(testUrl).split('/').filter(Boolean).pop();
+  const exam = await prisma.exam.findFirst({ where: { id: examId, joinCode: normalizedCode }, select: { id: true, title: true, subject: true, durationMin: true, status: true, joinCode: true } });
+  if (!exam) return res.status(404).json({ message: 'Invalid test URL or code' });
+  if (exam.status !== 'LIVE') return res.status(409).json({ message: 'This test is not live yet' });
+  return res.json({ exam });
+});
+
 app.post('/api/exams', async (req, res) => {
   const { title, subject, durationMin, facultyId } = req.body;
   if (!title || !subject || !durationMin) return res.status(400).json({ message: 'title, subject and durationMin are required' });
   const faculty = facultyId ? await prisma.user.findUnique({ where: { id: facultyId } }) : await prisma.user.findFirst({ where: { role: 'FACULTY' } });
   if (!faculty) return res.status(400).json({ message: 'No faculty user exists. Run npm run db:seed first.' });
-  const exam = await prisma.exam.create({ data: { title, subject, durationMin: Number(durationMin), facultyId: faculty.id } });
-  return res.status(201).json(exam);
+  const joinCode = makeJoinCode();
+  const exam = await prisma.exam.create({ data: { title: String(title).trim(), subject: String(subject).trim(), durationMin: Number(durationMin), facultyId: faculty.id, joinCode } });
+  const accessUrl = `${req.protocol}://${req.get('host').replace(':4000', ':5173')}/#/test/${exam.id}`;
+  const updated = await prisma.exam.update({ where: { id: exam.id }, data: { accessUrl } });
+  return res.status(201).json(updated);
 });
 
 app.get('/api', (_req, res) => { res.json({ name: 'AnomalyDash API', message: 'Database-backed API is running.' }); });
