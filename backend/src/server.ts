@@ -419,7 +419,7 @@ app.post('/api/exams/:id/questions', async (req, res) => {
   if (!prompt || !marks || !['MCQ', 'DESCRIPTIVE'].includes(type)) return res.status(400).json({ message: 'type, prompt and marks are required' });
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
-  if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the test owner can publish this test' });
+  if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the test owner can add questions' });
   if (exam.status !== 'DRAFT') return res.status(409).json({ message: 'Questions are locked after the test is published' });
   const question = await prisma.question.create({
     data: {
@@ -468,7 +468,7 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       }
     });
     if (!exam) return res.status(404).json({ message: 'Test not found' });
-    if (exam.facultyId !== String(req.query.facultyId ?? '')) return res.status(403).json({ message: 'Only the exam faculty can view live monitoring' });
+    if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the exam owner can view live monitoring' });
     return res.json(exam.attempts.map(attempt => ({
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
@@ -485,6 +485,7 @@ app.patch('/api/exams/:id/publish', async (req, res) => {
   if (!requireRole(req, res, 'FACULTY')) return;
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
+  if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the test owner can publish this test' });
   if (exam.status !== 'DRAFT') return res.status(409).json({ message: 'Only draft tests can be published' });
   if (exam._count.questions === 0) return res.status(400).json({ message: 'Add at least one question before publishing' });
   const updated = await prisma.exam.update({ where: { id: exam.id }, data: { status: 'LIVE' } });
