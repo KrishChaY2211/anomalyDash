@@ -101,7 +101,7 @@ app.get('/api/students/:studentId/history', async (req, res) => {
       include: { exam: { select: { id: true, title: true, subject: true, durationMin: true, status: true, faculty: { select: { name: true } } } } },
       orderBy: { submittedAt: 'desc' }
     });
-    return res.json(attempts);
+    return res.json(attempts.map(({ anomalyScore: _score, anomalyLevel: _level, ...attempt }) => attempt));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not load student history' });
@@ -126,7 +126,8 @@ app.post('/api/exams/:id/start', async (req, res) => {
     const existing = await prisma.examAttempt.findUnique({ where: { examId_studentId: { examId: exam.id, studentId: student.id } }, include: { answers: true } });
     if (existing) {
       if (existing.status === 'IN_PROGRESS' && existing.expiresAt > new Date()) {
-        return res.json({ attempt: existing, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+        const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = existing;
+        return res.json({ attempt: studentAttempt, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
       }
       if (existing.status === 'IN_PROGRESS') {
         await prisma.examAttempt.update({ where: { id: existing.id }, data: { status: 'EXPIRED' } });
@@ -136,7 +137,8 @@ app.post('/api/exams/:id/start', async (req, res) => {
     const startedAt = new Date();
     const expiresAt = new Date(startedAt.getTime() + exam.durationMin * 60 * 1000);
     const attempt = await prisma.examAttempt.create({ data: { examId: exam.id, studentId: student.id, startedAt, expiresAt } });
-    return res.status(201).json({ attempt, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+    const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = attempt;
+    return res.status(201).json({ attempt: studentAttempt, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
   } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not start exam' }); }
 });
 
@@ -144,7 +146,8 @@ app.get('/api/attempts/:id', async (req, res) => {
   const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { include: { questions: { orderBy: { createdAt: 'asc' } } } }, answers: true } });
   if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
   const questions = attempt.exam.questions.map(({ answerKey, ...q }) => q);
-  return res.json({ attempt, exam: { ...attempt.exam, questions } });
+  const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = attempt;
+  return res.json({ attempt: studentAttempt, exam: { ...attempt.exam, questions } });
 });
 
 app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
@@ -162,7 +165,7 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
     const score = Math.min(100, (await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id } })).reduce((sum, e) => sum + (weights[e.type] ?? 0), 0));
     const anomalyLevel = score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : score >= 10 ? 'LOW' : 'CLEAR';
     await prisma.examAttempt.update({ where: { id: attempt.id }, data: { anomalyScore: score, anomalyLevel } });
-    return res.status(201).json({ event, anomalyScore: score, anomalyLevel });
+    return res.status(201).json({ event });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not record monitoring event' });
@@ -176,7 +179,7 @@ app.get('/api/attempts/:id/monitoring', async (req, res) => {
       include: { monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 50 }, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
-    return res.json({ attemptId: attempt.id, student: attempt.student, exam: attempt.exam, anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel, events: attempt.monitoringEvents });
+    return res.json({ attemptId: attempt.id, student: attempt.student, exam: attempt.exam, events: attempt.monitoringEvents });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not load monitoring data' });
