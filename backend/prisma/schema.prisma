@@ -40,6 +40,9 @@ model Exam {
   title       String
   subject     String
   durationMin Int
+  lowThreshold Int @default(10)
+  mediumThreshold Int @default(30)
+  highThreshold Int @default(60)
   joinCode    String?     @unique
   accessUrl   String?
   status      ExamStatus  @default(DRAFT)
