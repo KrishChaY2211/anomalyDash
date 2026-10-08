@@ -155,17 +155,26 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
     const { type, metadata } = req.body;
     const allowed = ['TAB_HIDDEN','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT'];
     if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
-    const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id } });
+    const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
     if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is no longer active' });
     const event = await prisma.monitoringEvent.create({
       data: { attemptId: attempt.id, type: String(type), metadata: metadata ? JSON.stringify(metadata).slice(0, 500) : null }
     });
     const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0 };
-    const score = Math.min(100, (await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id } })).reduce((sum, e) => sum + (weights[e.type] ?? 0), 0));
-    const anomalyLevel = score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : score >= 10 ? 'LOW' : 'CLEAR';
-    await prisma.examAttempt.update({ where: { id: attempt.id }, data: { anomalyScore: score, anomalyLevel } });
-    return res.status(201).json({ event });
+    const allEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'desc' } });
+    const baseScore = allEvents.reduce((sum, item) => sum + (weights[item.type] ?? 0), 0);
+    const eventTypes = new Set(allEvents.map(item => item.type));
+    const combinedFactors: Array<{ type: string; contribution: number }> = [];
+    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR')) && eventTypes.has('PASTE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_PASTE', contribution: 8 });
+    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR')) && eventTypes.has('LONG_IDLE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_LONG_IDLE', contribution: 8 });
+    if (allEvents.filter(item => ['TAB_HIDDEN', 'WINDOW_BLUR', 'FULLSCREEN_EXIT'].includes(item.type)).length >= 3) combinedFactors.push({ type: 'REPEATED_INTERRUPTION', contribution: 5 });
+    const score = Math.min(100, baseScore + combinedFactors.reduce((sum, factor) => sum + factor.contribution, 0));
+    const { lowThreshold, mediumThreshold, highThreshold } = attempt.exam;
+    const anomalyLevel = score >= highThreshold ? 'HIGH' : score >= mediumThreshold ? 'MEDIUM' : score >= lowThreshold ? 'LOW' : 'CLEAR';
+    const updatedAttempt = await prisma.examAttempt.update({ where: { id: attempt.id }, data: { anomalyScore: score, anomalyLevel } });
+    const factors = Object.entries(allEvents.reduce((counts: Record<string, number>, item) => { counts[item.type] = (counts[item.type] ?? 0) + 1; return counts; }, {})).map(([type, count]) => ({ type, count, weight: weights[type] ?? 0, contribution: (weights[type] ?? 0) * Number(count) })).concat(combinedFactors.map(factor => ({ type: factor.type, count: 1, weight: factor.contribution, contribution: factor.contribution })));
+    return res.status(201).json({ event, anomalyScore: updatedAttempt.anomalyScore, anomalyLevel: updatedAttempt.anomalyLevel, factors });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not record monitoring event' });
@@ -284,7 +293,7 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
       startedAt: attempt.startedAt, events: attempt.monitoringEvents
-    })));
+    })).sort((a, b) => b.anomalyScore - a.anomalyScore || b.startedAt.getTime() - a.startedAt.getTime()));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not load live monitoring data' });
@@ -325,11 +334,17 @@ app.post('/api/exams/join', async (req, res) => {
 
 app.post('/api/exams', async (req, res) => {
   const { title, subject, durationMin, facultyId } = req.body;
-  if (!title || !subject || !durationMin) return res.status(400).json({ message: 'title, subject and durationMin are required' });
+  const lowThreshold = Number(req.body.lowThreshold ?? 10);
+  const mediumThreshold = Number(req.body.mediumThreshold ?? 30);
+  const highThreshold = Number(req.body.highThreshold ?? 60);
+  if (!title || !subject || !Number.isInteger(Number(durationMin)) || Number(durationMin) < 1 || Number(durationMin) > 300) return res.status(400).json({ message: 'A title, subject and duration from 1 to 300 minutes are required' });
+  if (![lowThreshold, mediumThreshold, highThreshold].every(value => Number.isInteger(value) && value >= 1 && value <= 100) || !(lowThreshold < mediumThreshold && mediumThreshold < highThreshold)) {
+    return res.status(400).json({ message: 'Thresholds must be whole numbers from 1 to 100 in ascending order: low < medium < high' });
+  }
   const faculty = facultyId ? await prisma.user.findUnique({ where: { id: facultyId } }) : await prisma.user.findFirst({ where: { role: 'FACULTY' } });
   if (!faculty) return res.status(400).json({ message: 'No faculty user exists. Run npm run db:seed first.' });
   const joinCode = makeJoinCode();
-  const exam = await prisma.exam.create({ data: { title: String(title).trim(), subject: String(subject).trim(), durationMin: Number(durationMin), facultyId: faculty.id, joinCode } });
+  const exam = await prisma.exam.create({ data: { title: String(title).trim(), subject: String(subject).trim(), durationMin: Number(durationMin), lowThreshold, mediumThreshold, highThreshold, facultyId: faculty.id, joinCode } });
   const host = req.get('host') ?? 'localhost:4000';
   const accessUrl = `${req.protocol}://${host.replace(':4000', ':5173')}/#/test/${exam.id}`;
   const updated = await prisma.exam.update({ where: { id: exam.id }, data: { accessUrl } });
