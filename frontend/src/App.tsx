@@ -287,7 +287,6 @@ function App() {
           {currentUser?.role === 'FACULTY' && <><button className={`nav-link ${view === 'faculty' ? 'active' : ''}`} onClick={() => navigate('faculty')}>Faculty</button><button className={`nav-link ${view === 'faculty-history' ? 'active' : ''}`} onClick={() => { navigate('faculty-history'); void loadFacultyHistory(); }}>History</button></>}
           {currentUser?.role === 'STUDENT' && <><button className={`nav-link ${view === 'student' ? 'active' : ''}`} onClick={() => navigate('student')}>Student</button><button className={`nav-link ${view === 'student-history' ? 'active' : ''}`} onClick={() => { navigate('student-history'); void loadStudentHistory(); }}>Past Exams</button></>}
           {currentUser && <button className="nav-link" onClick={logout}>Sign out</button>}
-          <span className="nav-status"><span className={`status-dot ${dbStatus === 'connected' ? 'db-online' : ''}`} />{statusLabel}</span>
         </div>
       </nav>
 
