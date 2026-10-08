@@ -142,6 +142,42 @@ app.get('/api/attempts/:id', async (req, res) => {
   return res.json({ attempt, exam: { ...attempt.exam, questions } });
 });
 
+app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
+  try {
+    const { type, metadata } = req.body;
+    const allowed = ['TAB_HIDDEN','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT'];
+    if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
+    const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id } });
+    if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is no longer active' });
+    const event = await prisma.monitoringEvent.create({
+      data: { attemptId: attempt.id, type: String(type), metadata: metadata ? JSON.stringify(metadata).slice(0, 500) : null }
+    });
+    const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0 };
+    const score = Math.min(100, (await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id } })).reduce((sum, e) => sum + (weights[e.type] ?? 0), 0));
+    const anomalyLevel = score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : score >= 10 ? 'LOW' : 'CLEAR';
+    await prisma.examAttempt.update({ where: { id: attempt.id }, data: { anomalyScore: score, anomalyLevel } });
+    return res.status(201).json({ event, anomalyScore: score, anomalyLevel });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not record monitoring event' });
+  }
+});
+
+app.get('/api/attempts/:id/monitoring', async (req, res) => {
+  try {
+    const attempt = await prisma.examAttempt.findUnique({
+      where: { id: req.params.id },
+      include: { monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 50 }, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true } } }
+    });
+    if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    return res.json({ attemptId: attempt.id, student: attempt.student, exam: attempt.exam, anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel, events: attempt.monitoringEvents });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not load monitoring data' });
+  }
+});
+
 app.put('/api/attempts/:id/answers', async (req, res) => {
   try {
     const { questionId, answer } = req.body;
