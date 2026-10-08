@@ -1,6 +1,6 @@
 # AnomalyDash — Phase 5: Explainable Anomaly Monitoring
 
-**Implementation status:** Core monitoring enhancements committed; local build and end-to-end verification still required.
+**Implementation status:** Expanded event collection and feature extraction committed to this branch; local build and end-to-end verification still required.
 
 ## Objective
 
