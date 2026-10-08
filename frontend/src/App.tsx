@@ -72,6 +72,11 @@ function App() {
   const lastAnswerAt = useRef(0);
   const lastInteractionAt = useRef(Date.now());
   const fullscreenStarted = useRef(false);
+  const awayStartedAt = useRef<number | null>(null);
+  const questionStartedAt = useRef<Record<string, number>>({});
+  const questionFirstResponseRecorded = useRef<Record<string, boolean>>({});
+  const questionStartedEvents = useRef<Record<string, boolean>>({});
+  const answerValues = useRef<Record<string, string>>({});
   const [facultyHistory, setFacultyHistory] = useState<any[]>([]);
   const [studentHistory, setStudentHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -242,7 +247,13 @@ function App() {
       if (!response.ok) throw new Error(data.message || 'Could not start exam');
       setActiveAttempt(data.attempt);
       setActiveExam(data.exam);
-      setAnswers(Object.fromEntries((data.attempt.answers || []).map((a: any) => [a.questionId, a.answer])));
+      const restoredAnswers = Object.fromEntries((data.attempt.answers || []).map((a: any) => [a.questionId, a.answer]));
+      setAnswers(restoredAnswers);
+      answerValues.current = restoredAnswers;
+      questionStartedAt.current = {};
+      questionFirstResponseRecorded.current = {};
+      questionStartedEvents.current = {};
+      awayStartedAt.current = null;
       setRemainingSeconds(Math.max(0, Math.floor((new Date(data.attempt.expiresAt).getTime() - Date.now()) / 1000)));
       setAnomalyScore(data.attempt.anomalyScore || 0);
       setAnomalyLevel(data.attempt.anomalyLevel || 'CLEAR');
@@ -272,11 +283,29 @@ function App() {
     if (view !== 'exam' || !activeAttempt || activeAttempt.status !== 'IN_PROGRESS') return;
     lastInteractionAt.current = Date.now();
     fullscreenStarted.current = Boolean(document.fullscreenElement);
-    const onVisibility = () => void recordMonitoringEvent(document.hidden ? 'TAB_HIDDEN' : 'WINDOW_FOCUS');
-    const onBlur = () => void recordMonitoringEvent('WINDOW_BLUR');
-    const onFocus = () => void recordMonitoringEvent('WINDOW_FOCUS');
-    const onPaste = (event: ClipboardEvent) => { event.preventDefault(); void recordMonitoringEvent('PASTE'); };
+    const onVisibility = () => {
+      if (document.hidden) {
+        awayStartedAt.current = Date.now();
+        void recordMonitoringEvent('TAB_HIDDEN');
+      } else {
+        const awayDurationMs = awayStartedAt.current === null ? 0 : Math.max(0, Date.now() - awayStartedAt.current);
+        awayStartedAt.current = null;
+        void recordMonitoringEvent('TAB_VISIBLE', { awayDurationMs });
+      }
+    };
+    const onBlur = () => {
+      if (awayStartedAt.current === null) awayStartedAt.current = Date.now();
+      void recordMonitoringEvent('WINDOW_BLUR');
+    };
+    const onFocus = () => {
+      const awayDurationMs = awayStartedAt.current === null ? 0 : Math.max(0, Date.now() - awayStartedAt.current);
+      awayStartedAt.current = null;
+      void recordMonitoringEvent('WINDOW_FOCUS', { awayDurationMs });
+    };
+    const onPaste = () => void recordMonitoringEvent('PASTE');
     const onCopy = () => void recordMonitoringEvent('COPY');
+    const onOffline = () => void recordMonitoringEvent('OFFLINE');
+    const onOnline = () => void recordMonitoringEvent('ONLINE');
     const onActivity = () => { lastInteractionAt.current = Date.now(); };
     const onFullscreen = () => {
       if (fullscreenStarted.current && !document.fullscreenElement) void recordMonitoringEvent('FULLSCREEN_EXIT');
@@ -287,6 +316,8 @@ function App() {
     window.addEventListener('focus', onFocus);
     document.addEventListener('paste', onPaste);
     document.addEventListener('copy', onCopy);
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
     document.addEventListener('mousemove', onActivity);
     document.addEventListener('keydown', onActivity);
     document.addEventListener('click', onActivity);
@@ -304,6 +335,8 @@ function App() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('paste', onPaste);
       document.removeEventListener('copy', onCopy);
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
       document.removeEventListener('mousemove', onActivity);
       document.removeEventListener('keydown', onActivity);
       document.removeEventListener('click', onActivity);
@@ -320,12 +353,44 @@ function App() {
     }
   };
 
-  useEffect(() => { setCurrentQuestionIndex(0); }, [activeExam?.id]);
+  useEffect(() => {
+    setCurrentQuestionIndex(0);
+    if (activeExam?.questions?.[0]?.id) questionStartedAt.current[activeExam.questions[0].id] = Date.now();
+  }, [activeExam?.id]);
+
+  useEffect(() => {
+    const question = activeExam?.questions?.[currentQuestionIndex];
+    if (view === 'exam' && activeAttempt?.status === 'IN_PROGRESS' && question?.id && questionStartedAt.current[question.id] === undefined) {
+      questionStartedAt.current[question.id] = Date.now();
+    }
+  }, [view, activeExam?.id, currentQuestionIndex, activeAttempt?.status]);
+
+  const goToQuestion = (nextIndex: number) => {
+    if (!activeExam || !activeAttempt) return;
+    const question = activeExam.questions[currentQuestionIndex];
+    if (question && !String(answerValues.current[question.id] || '').trim()) {
+      void recordMonitoringEvent('SKIPPED_QUESTION', { questionId: question.id, questionNumber: currentQuestionIndex + 1, direction: nextIndex > currentQuestionIndex ? 'next' : 'previous' });
+    }
+    setCurrentQuestionIndex(Math.max(0, Math.min(activeExam.questions.length - 1, nextIndex)));
+  };
 
   const saveAnswer = async (questionId: string, answer: string) => {
     if (!activeAttempt) return;
     const now = Date.now();
-    if (now - lastAnswerAt.current < 1200) void recordMonitoringEvent('RAPID_ANSWERS', { intervalMs: now - lastAnswerAt.current });
+    if (!questionStartedEvents.current[questionId]) {
+      questionStartedEvents.current[questionId] = true;
+      if (questionStartedAt.current[questionId] === undefined) questionStartedAt.current[questionId] = now;
+      void recordMonitoringEvent('ANSWER_STARTED', { questionId });
+    }
+    const previousAnswer = answerValues.current[questionId] || '';
+    if (previousAnswer !== answer) {
+      const firstResponse = !questionFirstResponseRecorded.current[questionId] && Boolean(answer.trim());
+      const responseTimeMs = Math.max(0, now - (questionStartedAt.current[questionId] ?? now));
+      void recordMonitoringEvent('ANSWER_CHANGED', { questionId, answerLength: answer.length, changedFromExisting: Boolean(previousAnswer), firstResponse, responseTimeMs });
+      if (firstResponse) questionFirstResponseRecorded.current[questionId] = true;
+      answerValues.current[questionId] = answer;
+    }
+    if (now - lastAnswerAt.current < 1200 && lastAnswerAt.current > 0) void recordMonitoringEvent('RAPID_ANSWERS', { intervalMs: now - lastAnswerAt.current });
     lastAnswerAt.current = now;
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
     try {
@@ -341,6 +406,7 @@ function App() {
     if (!activeAttempt) return;
     setExamLoading(true); setExamError('');
     try {
+      void recordMonitoringEvent('ANSWER_SUBMITTED', { answeredQuestionCount: Object.values(answerValues.current).filter(value => String(value || '').trim()).length });
       const response = await fetch(`/api/attempts/${activeAttempt.id}/submit`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not submit exam');
@@ -448,7 +514,7 @@ function App() {
 
       {view === 'faculty-history' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY HISTORY</span><h1>Past examinations.</h1><p>Review completed tests, participating students, scores and recorded anomaly signals.</p></div><button className="secondary" onClick={()=>void loadFacultyHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading examination history…</p></div> : facultyHistory.length === 0 ? <div className="data-card"><p>No completed examinations yet.</p></div> : <div className="history-list">{facultyHistory.map((exam:any)=><article className="history-card" key={exam.id}><div className="history-card-head"><div><span className="label">COMPLETED TEST</span><h2>{exam.title}</h2><p>{exam.subject} · {exam.durationMin} min · {exam.attempts.length} student attempt(s)</p></div><span className="history-status">COMPLETED</span></div><div className="history-attempts">{exam.attempts.length === 0 ? <p>No student attempts recorded.</p> : exam.attempts.map((attempt:any)=><div className="history-attempt" key={attempt.id}><div><strong>{attempt.student.name}</strong><span>{attempt.student.rollNumber || attempt.student.email}</span></div><div><b>{attempt.score ?? 0} marks</b><span>{attempt.status}</span></div><div><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel} · {attempt.anomalyScore}</b><span>Anomaly score</span></div></div>)}</div></article>)}</div>}</section>}
 
-      {view === 'exam' && currentUser?.role === 'STUDENT' && activeExam && activeAttempt && <section className="page workspace exam-page"><div className="page-heading"><div><span className="eyebrow">LIVE EXAMINATION</span><h1>{activeExam.title}</h1><p>{activeExam.subject} · {activeExam.questions.length} questions · {currentUser.name}</p></div><div className="exam-monitor"><span className="monitor-level">EXAM IN PROGRESS</span><button type="button" className="monitor-fullscreen" onClick={()=>void enterFullscreen()}>Enter fullscreen</button></div><div className="exam-timer">{Math.floor(remainingSeconds / 60).toString().padStart(2,'0')}:{(remainingSeconds % 60).toString().padStart(2,'0')}</div></div>{examError && <div className="join-feedback error">{examError}</div>}{examMessage ? <div className="join-feedback success">{examMessage}<button className="secondary" onClick={()=>navigate('student')}>Return to dashboard</button></div> : <>{activeExam.questions.length > 0 && (() => { const q=activeExam.questions[currentQuestionIndex]; if (!q) return null; return <><div className="exam-progress"><span>Question {currentQuestionIndex+1} of {activeExam.questions.length}</span><div className="exam-progress-track"><div className="exam-progress-fill" style={{width:`${((currentQuestionIndex+1)/activeExam.questions.length)*100}%`}} /></div><span>{Object.keys(answers).filter(id=>String(answers[id] || '').trim()).length} answered</span></div><div className="exam-questions"><article className="question-card" key={q.id}><div className="question-meta"><span>QUESTION {currentQuestionIndex+1}</span><b>{q.marks} mark{q.marks === 1 ? '' : 's'}</b></div><h2>{q.prompt}</h2>{q.type === 'MCQ' ? <div className="option-list">{String(q.options || '').split('|').map((option:string,i:number)=>{const value=option.trim(); return value ? <label className={answers[q.id] === value ? 'option selected' : 'option'} key={i}><input type="radio" name={q.id} checked={answers[q.id] === value} onChange={()=>void saveAnswer(q.id,value)} />{value}</label> : null;})}</div> : <textarea className="answer-box" value={answers[q.id] || ''} onChange={e=>void saveAnswer(q.id,e.target.value)} placeholder="Type your answer here..." />}</article></div><div className="exam-question-nav"><button type="button" className="secondary" disabled={currentQuestionIndex===0} onClick={()=>setCurrentQuestionIndex(index=>Math.max(0,index-1))}>← Previous</button><span>{currentQuestionIndex === activeExam.questions.length-1 ? 'You have reached the last question.' : 'Your answer is saved automatically.'}</span>{currentQuestionIndex < activeExam.questions.length-1 ? <button type="button" className="primary" onClick={()=>setCurrentQuestionIndex(index=>Math.min(activeExam.questions.length-1,index+1))}>Next question →</button> : <button className="primary" disabled={examLoading} onClick={()=>void submitExam()}>{examLoading ? 'Submitting…' : 'Submit exam →'}</button>}</div></>; })()}</>}</section>}
+      {view === 'exam' && currentUser?.role === 'STUDENT' && activeExam && activeAttempt && <section className="page workspace exam-page"><div className="page-heading"><div><span className="eyebrow">LIVE EXAMINATION</span><h1>{activeExam.title}</h1><p>{activeExam.subject} · {activeExam.questions.length} questions · {currentUser.name}</p></div><div className="exam-monitor"><span className="monitor-level">EXAM IN PROGRESS</span><button type="button" className="monitor-fullscreen" onClick={()=>void enterFullscreen()}>Enter fullscreen</button></div><div className="exam-timer">{Math.floor(remainingSeconds / 60).toString().padStart(2,'0')}:{(remainingSeconds % 60).toString().padStart(2,'0')}</div></div>{examError && <div className="join-feedback error">{examError}</div>}{examMessage ? <div className="join-feedback success">{examMessage}<button className="secondary" onClick={()=>navigate('student')}>Return to dashboard</button></div> : <>{activeExam.questions.length > 0 && (() => { const q=activeExam.questions[currentQuestionIndex]; if (!q) return null; return <><div className="exam-progress"><span>Question {currentQuestionIndex+1} of {activeExam.questions.length}</span><div className="exam-progress-track"><div className="exam-progress-fill" style={{width:`${((currentQuestionIndex+1)/activeExam.questions.length)*100}%`}} /></div><span>{Object.keys(answers).filter(id=>String(answers[id] || '').trim()).length} answered</span></div><div className="exam-questions"><article className="question-card" key={q.id}><div className="question-meta"><span>QUESTION {currentQuestionIndex+1}</span><b>{q.marks} mark{q.marks === 1 ? '' : 's'}</b></div><h2>{q.prompt}</h2>{q.type === 'MCQ' ? <div className="option-list">{String(q.options || '').split('|').map((option:string,i:number)=>{const value=option.trim(); return value ? <label className={answers[q.id] === value ? 'option selected' : 'option'} key={i}><input type="radio" name={q.id} checked={answers[q.id] === value} onChange={()=>void saveAnswer(q.id,value)} />{value}</label> : null;})}</div> : <textarea className="answer-box" value={answers[q.id] || ''} onChange={e=>void saveAnswer(q.id,e.target.value)} placeholder="Type your answer here..." />}</article></div><div className="exam-question-nav"><button type="button" className="secondary" disabled={currentQuestionIndex===0} onClick={()=>goToQuestion(currentQuestionIndex-1)}>← Previous</button><span>{currentQuestionIndex === activeExam.questions.length-1 ? 'You have reached the last question.' : 'Your answer is saved automatically.'}</span>{currentQuestionIndex < activeExam.questions.length-1 ? <button type="button" className="primary" onClick={()=>goToQuestion(currentQuestionIndex+1)}>Next question →</button> : <button className="primary" disabled={examLoading} onClick={()=>void submitExam()}>{examLoading ? 'Submitting…' : 'Submit exam →'}</button>}</div></>; })()}</>}</section>}
 
       {view === 'student-history' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">PAST EXAMS</span><h1>Your examination history.</h1><p>Review the tests you have completed and the results recorded for each attempt.</p></div><button className="secondary" onClick={()=>void loadStudentHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading past exams…</p></div> : studentHistory.length === 0 ? <div className="data-card"><p>You have no completed exams yet.</p></div> : <div className="history-list">{studentHistory.map((attempt:any)=><article className="history-card student-history-card" key={attempt.id}><div><span className="label">PAST EXAM</span><h2>{attempt.exam.title}</h2><p>{attempt.exam.subject} · Faculty: {attempt.exam.faculty.name}</p></div><div className="student-result-grid"><div><span>STATUS</span><b>{attempt.status}</b></div><div><span>SCORE</span><b>{attempt.score ?? 0}</b></div><div><span>SUBMITTED</span><b>{attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : '—'}</b></div></div></article>)}</div>}</section>}
 
