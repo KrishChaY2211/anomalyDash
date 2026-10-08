@@ -33,7 +33,7 @@ const buildMonitoringFeatures = (
     counts[event.type] = (counts[event.type] ?? 0) + 1;
     const metadata = parseEventMetadata(event.metadata);
     const awayDuration = Number(metadata.awayDurationMs ?? 0);
-    if (event.type === 'TAB_VISIBLE' && Number.isFinite(awayDuration) && awayDuration > 0) awayDurations.push(awayDuration);
+    if (['TAB_VISIBLE', 'FOCUS_REGAINED', 'WINDOW_FOCUS'].includes(event.type) && Number.isFinite(awayDuration) && awayDuration > 0) awayDurations.push(awayDuration);
     if (event.type === 'ANSWER_CHANGED' && metadata.firstResponse === true) {
       const responseTime = Number(metadata.responseTimeMs);
       if (Number.isFinite(responseTime) && responseTime >= 0) firstResponseTimes.push(responseTime);
@@ -49,7 +49,7 @@ const buildMonitoringFeatures = (
     : 0;
   return {
     tabSwitchCount: counts.TAB_HIDDEN ?? 0,
-    focusLossCount: counts.WINDOW_BLUR ?? 0,
+    focusLossCount: (counts.FOCUS_LOST ?? 0) + (counts.WINDOW_BLUR ?? 0),
     totalAwayMs,
     maxAwayMs,
     pasteCount: counts.PASTE ?? 0,
@@ -62,6 +62,7 @@ const buildMonitoringFeatures = (
     offlineCount: counts.OFFLINE ?? 0,
     onlineCount: counts.ONLINE ?? 0,
     tabVisibleCount: counts.TAB_VISIBLE ?? 0,
+    focusRegainCount: (counts.FOCUS_REGAINED ?? 0) + (counts.WINDOW_FOCUS ?? 0),
     answerStartedCount: counts.ANSWER_STARTED ?? 0,
     answerSubmittedCount: counts.ANSWER_SUBMITTED ?? 0,
     eventCounts: counts
@@ -217,14 +218,14 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
     const event = await prisma.monitoringEvent.create({
       data: { attemptId: attempt.id, type: String(type), metadata: metadata ? JSON.stringify(metadata).slice(0, 500) : null }
     });
-    const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0 };
+    const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, FOCUS_LOST: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0, FOCUS_REGAINED: 0, TAB_VISIBLE: 0, OFFLINE: 0, ONLINE: 0, ANSWER_STARTED: 0, ANSWER_CHANGED: 0, ANSWER_SUBMITTED: 0, SKIPPED_QUESTION: 0 };
     const allEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'desc' } });
     const baseScore = allEvents.reduce((sum, item) => sum + (weights[item.type] ?? 0), 0);
     const eventTypes = new Set(allEvents.map(item => item.type));
     const combinedFactors: Array<{ type: string; contribution: number }> = [];
-    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR')) && eventTypes.has('PASTE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_PASTE', contribution: 8 });
-    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR')) && eventTypes.has('LONG_IDLE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_LONG_IDLE', contribution: 8 });
-    if (allEvents.filter(item => ['TAB_HIDDEN', 'WINDOW_BLUR', 'FULLSCREEN_EXIT'].includes(item.type)).length >= 3) combinedFactors.push({ type: 'REPEATED_INTERRUPTION', contribution: 5 });
+    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR') || eventTypes.has('FOCUS_LOST')) && eventTypes.has('PASTE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_PASTE', contribution: 8 });
+    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR') || eventTypes.has('FOCUS_LOST')) && eventTypes.has('LONG_IDLE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_LONG_IDLE', contribution: 8 });
+    if (allEvents.filter(item => ['TAB_HIDDEN', 'WINDOW_BLUR', 'FOCUS_LOST', 'FULLSCREEN_EXIT'].includes(item.type)).length >= 3) combinedFactors.push({ type: 'REPEATED_INTERRUPTION', contribution: 5 });
     const score = Math.min(100, baseScore + combinedFactors.reduce((sum, factor) => sum + factor.contribution, 0));
     const { lowThreshold, mediumThreshold, highThreshold } = attempt.exam;
     const anomalyLevel = score >= highThreshold ? 'HIGH' : score >= mediumThreshold ? 'MEDIUM' : score >= lowThreshold ? 'LOW' : 'CLEAR';
