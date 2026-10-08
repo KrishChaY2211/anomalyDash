@@ -79,7 +79,7 @@ app.get('/api/db/health', async (_req, res) => {
 
 app.get('/api/exams', async (req, res) => {
   const facultyId = typeof req.query.facultyId === 'string' ? req.query.facultyId : undefined;
-  const exams = await prisma.exam.findMany({ where: facultyId ? { facultyId } : undefined({ include: { faculty: true, _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
+  const exams = await prisma.exam.findMany({ where: facultyId ? { facultyId } : undefined, include: { faculty: true, _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
   res.json(exams);
 });
 
