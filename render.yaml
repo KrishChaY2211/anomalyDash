@@ -1,0 +1,46 @@
+databases:
+  - name: anomalydash-db
+    databaseName: anomalydash
+    user: anomalydash
+    plan: free
+    region: singapore
+
+services:
+  - type: web
+    name: anomalydash-api
+    runtime: node
+    plan: free
+    region: singapore
+    repo: https://github.com/KrishChaY2211/anomalyDash
+    branch: security/deployment-readiness
+    autoDeploy: false
+    buildCommand: cd backend && npm install && npx prisma generate && npm run build
+    startCommand: cd backend && npx prisma db push && npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: anomalydash-db
+          property: connectionString
+      - key: SESSION_SECRET
+        sync: false
+      - key: FACULTY_SIGNUP_CODE
+        sync: false
+      - key: FRONTEND_ORIGIN
+        value: https://anomalydash-web.onrender.com
+
+  - type: web
+    runtime: static
+    name: anomalydash-web
+    plan: free
+    region: singapore
+    repo: https://github.com/KrishChaY2211/anomalyDash
+    branch: security/deployment-readiness
+    autoDeploy: false
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://anomalydash-api.onrender.com
