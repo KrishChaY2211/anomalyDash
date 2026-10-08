@@ -12,6 +12,63 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+type MonitoringEventInput = { type: string; metadata: string | null; createdAt: Date };
+const parseEventMetadata = (metadata: string | null): Record<string, unknown> => {
+  if (!metadata) return {};
+  try {
+    const value = JSON.parse(metadata);
+    return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  } catch { return {}; }
+};
+
+const buildMonitoringFeatures = (
+  events: MonitoringEventInput[],
+  questionCount = 0,
+  answeredQuestionCount = 0
+) => {
+  const counts: Record<string, number> = {};
+  const awayDurations: number[] = [];
+  const firstResponseTimes: number[] = [];
+  for (const event of events) {
+    counts[event.type] = (counts[event.type] ?? 0) + 1;
+    const metadata = parseEventMetadata(event.metadata);
+    const awayDuration = Number(metadata.awayDurationMs ?? 0);
+    if (['TAB_VISIBLE', 'FOCUS_REGAINED', 'WINDOW_FOCUS'].includes(event.type) && Number.isFinite(awayDuration) && awayDuration > 0) awayDurations.push(awayDuration);
+    if (event.type === 'ANSWER_CHANGED' && metadata.firstResponse === true) {
+      const responseTime = Number(metadata.responseTimeMs);
+      if (Number.isFinite(responseTime) && responseTime >= 0) firstResponseTimes.push(responseTime);
+    }
+  }
+  const totalAwayMs = awayDurations.reduce((sum, value) => sum + value, 0);
+  const maxAwayMs = awayDurations.length ? Math.max(...awayDurations) : 0;
+  const averageResponseMs = firstResponseTimes.length
+    ? firstResponseTimes.reduce((sum, value) => sum + value, 0) / firstResponseTimes.length
+    : 0;
+  const responseTimeDeviationMs = firstResponseTimes.length
+    ? Math.sqrt(firstResponseTimes.reduce((sum, value) => sum + Math.pow(value - averageResponseMs, 2), 0) / firstResponseTimes.length)
+    : 0;
+  return {
+    tabSwitchCount: counts.TAB_HIDDEN ?? 0,
+    focusLossCount: (counts.FOCUS_LOST ?? 0) + (counts.WINDOW_BLUR ?? 0),
+    totalAwayMs,
+    maxAwayMs,
+    pasteCount: counts.PASTE ?? 0,
+    answerChangeCount: counts.ANSWER_CHANGED ?? 0,
+    averageResponseMs: Math.round(averageResponseMs),
+    responseTimeDeviationMs: Math.round(responseTimeDeviationMs),
+    skippedQuestionCount: counts.SKIPPED_QUESTION ?? 0,
+    answeredQuestionCount,
+    unansweredQuestionCount: Math.max(0, questionCount - answeredQuestionCount),
+    offlineCount: counts.OFFLINE ?? 0,
+    onlineCount: counts.ONLINE ?? 0,
+    tabVisibleCount: counts.TAB_VISIBLE ?? 0,
+    focusRegainCount: (counts.FOCUS_REGAINED ?? 0) + (counts.WINDOW_FOCUS ?? 0),
+    answerStartedCount: counts.ANSWER_STARTED ?? 0,
+    answerSubmittedCount: counts.ANSWER_SUBMITTED ?? 0,
+    eventCounts: counts
+  };
+};
+
 
 const hashPassword = (password: string) => {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -153,7 +210,7 @@ app.get('/api/attempts/:id', async (req, res) => {
 app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
   try {
     const { type, metadata } = req.body;
-    const allowed = ['TAB_HIDDEN','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT'];
+    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
     if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
@@ -161,14 +218,14 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
     const event = await prisma.monitoringEvent.create({
       data: { attemptId: attempt.id, type: String(type), metadata: metadata ? JSON.stringify(metadata).slice(0, 500) : null }
     });
-    const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0 };
+    const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, FOCUS_LOST: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0, FOCUS_REGAINED: 0, TAB_VISIBLE: 0, OFFLINE: 0, ONLINE: 0, ANSWER_STARTED: 0, ANSWER_CHANGED: 0, ANSWER_SUBMITTED: 0, SKIPPED_QUESTION: 0 };
     const allEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'desc' } });
     const baseScore = allEvents.reduce((sum, item) => sum + (weights[item.type] ?? 0), 0);
     const eventTypes = new Set(allEvents.map(item => item.type));
     const combinedFactors: Array<{ type: string; contribution: number }> = [];
-    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR')) && eventTypes.has('PASTE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_PASTE', contribution: 8 });
-    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR')) && eventTypes.has('LONG_IDLE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_LONG_IDLE', contribution: 8 });
-    if (allEvents.filter(item => ['TAB_HIDDEN', 'WINDOW_BLUR', 'FULLSCREEN_EXIT'].includes(item.type)).length >= 3) combinedFactors.push({ type: 'REPEATED_INTERRUPTION', contribution: 5 });
+    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR') || eventTypes.has('FOCUS_LOST')) && eventTypes.has('PASTE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_PASTE', contribution: 8 });
+    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR') || eventTypes.has('FOCUS_LOST')) && eventTypes.has('LONG_IDLE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_LONG_IDLE', contribution: 8 });
+    if (allEvents.filter(item => ['TAB_HIDDEN', 'WINDOW_BLUR', 'FOCUS_LOST', 'FULLSCREEN_EXIT'].includes(item.type)).length >= 3) combinedFactors.push({ type: 'REPEATED_INTERRUPTION', contribution: 5 });
     const score = Math.min(100, baseScore + combinedFactors.reduce((sum, factor) => sum + factor.contribution, 0));
     const { lowThreshold, mediumThreshold, highThreshold } = attempt.exam;
     const anomalyLevel = score >= highThreshold ? 'HIGH' : score >= mediumThreshold ? 'MEDIUM' : score >= lowThreshold ? 'LOW' : 'CLEAR';
@@ -185,10 +242,11 @@ app.get('/api/attempts/:id/monitoring', async (req, res) => {
   try {
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: req.params.id },
-      include: { monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 50 }, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true } } }
+      include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, questions: { select: { id: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
-    return res.json({ attemptId: attempt.id, student: attempt.student, exam: attempt.exam, events: attempt.monitoringEvents });
+    const features = buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length);
+    return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not load monitoring data' });
@@ -282,7 +340,7 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       where: { id: req.params.id },
       include: {
         attempts: {
-          include: { student: { select: { name: true, rollNumber: true } }, monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 8 } },
+          include: { student: { select: { name: true, rollNumber: true } }, monitoringEvents: { orderBy: { createdAt: 'desc' } }, answers: true, exam: { select: { questions: { select: { id: true } } } } },
           orderBy: { startedAt: 'desc' }
         }
       }
@@ -292,7 +350,8 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
     return res.json(exam.attempts.map(attempt => ({
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
-      startedAt: attempt.startedAt, events: attempt.monitoringEvents
+      startedAt: attempt.startedAt, events: attempt.monitoringEvents.slice(0, 8),
+      features: buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length)
     })).sort((a, b) => b.anomalyScore - a.anomalyScore || b.startedAt.getTime() - a.startedAt.getTime()));
   } catch (error) {
     console.error(error);
