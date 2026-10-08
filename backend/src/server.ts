@@ -321,7 +321,8 @@ app.post('/api/exams', async (req, res) => {
   if (!faculty) return res.status(400).json({ message: 'No faculty user exists. Run npm run db:seed first.' });
   const joinCode = makeJoinCode();
   const exam = await prisma.exam.create({ data: { title: String(title).trim(), subject: String(subject).trim(), durationMin: Number(durationMin), facultyId: faculty.id, joinCode } });
-  const accessUrl = `${req.protocol}://${req.get('host').replace(':4000', ':5173')}/#/test/${exam.id}`;
+  const host = req.get('host') ?? 'localhost:4000';
+  const accessUrl = `${req.protocol}://${host.replace(':4000', ':5173')}/#/test/${exam.id}`;
   const updated = await prisma.exam.update({ where: { id: exam.id }, data: { accessUrl } });
   return res.status(201).json(updated);
 });
