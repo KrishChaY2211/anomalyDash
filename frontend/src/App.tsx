@@ -298,6 +298,9 @@ function App() {
 
   const saveAnswer = async (questionId: string, answer: string) => {
     if (!activeAttempt) return;
+    const now = Date.now();
+    if (now - lastAnswerAt.current < 1200) void recordMonitoringEvent('RAPID_ANSWERS', { intervalMs: now - lastAnswerAt.current });
+    lastAnswerAt.current = now;
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
     try {
       const response = await fetch(`/api/attempts/${activeAttempt.id}/answers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId, answer }) });
