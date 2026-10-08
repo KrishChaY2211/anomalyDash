@@ -258,6 +258,29 @@ app.patch('/api/exams/:id/end', async (req, res) => {
   }
 });
 
+app.get('/api/exams/:id/monitoring', async (req, res) => {
+  try {
+    const exam = await prisma.exam.findUnique({
+      where: { id: req.params.id },
+      include: {
+        attempts: {
+          include: { student: { select: { name: true, rollNumber: true } }, monitoringEvents: { orderBy: { createdAt: 'desc' }, take: 8 } },
+          orderBy: { startedAt: 'desc' }
+        }
+      }
+    });
+    if (!exam) return res.status(404).json({ message: 'Test not found' });
+    return res.json(exam.attempts.map(attempt => ({
+      id: attempt.id, student: attempt.student, status: attempt.status,
+      anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
+      startedAt: attempt.startedAt, events: attempt.monitoringEvents
+    })));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not load live monitoring data' });
+  }
+});
+
 app.patch('/api/exams/:id/publish', async (req, res) => {
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
