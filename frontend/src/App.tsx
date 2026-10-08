@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 
 type View = 'home' | 'login' | 'faculty' | 'student' | 'exam' | 'faculty-history' | 'student-history';
 type Role = 'faculty' | 'student';
@@ -58,6 +58,9 @@ function App() {
   const [examLoading, setExamLoading] = useState(false);
   const [examMessage, setExamMessage] = useState('');
   const [examError, setExamError] = useState('');
+  const [anomalyScore, setAnomalyScore] = useState(0);
+  const [anomalyLevel, setAnomalyLevel] = useState('CLEAR');
+  const lastAnswerAt = useRef(0);
   const [facultyHistory, setFacultyHistory] = useState<any[]>([]);
   const [studentHistory, setStudentHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -214,6 +217,8 @@ function App() {
       setActiveExam(data.exam);
       setAnswers(Object.fromEntries((data.attempt.answers || []).map((a: any) => [a.questionId, a.answer])));
       setRemainingSeconds(Math.max(0, Math.floor((new Date(data.attempt.expiresAt).getTime() - Date.now()) / 1000)));
+      setAnomalyScore(data.attempt.anomalyScore || 0);
+      setAnomalyLevel(data.attempt.anomalyLevel || 'CLEAR');
       // Enter the exam view directly without triggering the hashchange listener.
       window.history.pushState(null, '', '#/exam');
       setView('exam');
@@ -221,6 +226,41 @@ function App() {
     } catch (error) { setExamError(error instanceof Error ? error.message : 'Could not start exam'); }
     finally { setExamLoading(false); }
   };
+
+  const recordMonitoringEvent = async (type: string, metadata?: Record<string, unknown>) => {
+    if (!activeAttempt || activeAttempt.status !== 'IN_PROGRESS') return;
+    try {
+      const response = await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, metadata })
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setAnomalyScore(data.anomalyScore || 0);
+      setAnomalyLevel(data.anomalyLevel || 'CLEAR');
+    } catch { /* monitoring must never interrupt the exam */ }
+  };
+
+  useEffect(() => {
+    if (view !== 'exam' || !activeAttempt || activeAttempt.status !== 'IN_PROGRESS') return;
+    const onVisibility = () => void recordMonitoringEvent(document.hidden ? 'TAB_HIDDEN' : 'WINDOW_FOCUS');
+    const onBlur = () => void recordMonitoringEvent('WINDOW_BLUR');
+    const onFocus = () => void recordMonitoringEvent('WINDOW_FOCUS');
+    const onPaste = (event: ClipboardEvent) => { event.preventDefault(); void recordMonitoringEvent('PASTE'); };
+    const onCopy = () => void recordMonitoringEvent('COPY');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('paste', onPaste);
+    document.addEventListener('copy', onCopy);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('paste', onPaste);
+      document.removeEventListener('copy', onCopy);
+    };
+  }, [view, activeAttempt?.id, activeAttempt?.status]);
 
   const saveAnswer = async (questionId: string, answer: string) => {
     if (!activeAttempt) return;
@@ -307,7 +347,7 @@ function App() {
 
       {view === 'faculty-history' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY HISTORY</span><h1>Past examinations.</h1><p>Review completed tests, participating students, scores and recorded anomaly signals.</p></div><button className="secondary" onClick={()=>void loadFacultyHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading examination history…</p></div> : facultyHistory.length === 0 ? <div className="data-card"><p>No completed examinations yet.</p></div> : <div className="history-list">{facultyHistory.map((exam:any)=><article className="history-card" key={exam.id}><div className="history-card-head"><div><span className="label">COMPLETED TEST</span><h2>{exam.title}</h2><p>{exam.subject} · {exam.durationMin} min · {exam.attempts.length} student attempt(s)</p></div><span className="history-status">COMPLETED</span></div><div className="history-attempts">{exam.attempts.length === 0 ? <p>No student attempts recorded.</p> : exam.attempts.map((attempt:any)=><div className="history-attempt" key={attempt.id}><div><strong>{attempt.student.name}</strong><span>{attempt.student.rollNumber || attempt.student.email}</span></div><div><b>{attempt.score ?? 0} marks</b><span>{attempt.status}</span></div><div><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel} · {attempt.anomalyScore}</b><span>Anomaly score</span></div></div>)}</div></article>)}</div>}</section>}
 
-      {view === 'exam' && currentUser?.role === 'STUDENT' && activeExam && activeAttempt && <section className="page workspace exam-page"><div className="page-heading"><div><span className="eyebrow">LIVE EXAMINATION</span><h1>{activeExam.title}</h1><p>{activeExam.subject} · {activeExam.questions.length} questions · {currentUser.name}</p></div><div className="exam-timer">{Math.floor(remainingSeconds / 60).toString().padStart(2,'0')}:{(remainingSeconds % 60).toString().padStart(2,'0')}</div></div>{examError && <div className="join-feedback error">{examError}</div>}{examMessage ? <div className="join-feedback success">{examMessage}<button className="secondary" onClick={()=>navigate('student')}>Return to dashboard</button></div> : <><div className="exam-questions">{activeExam.questions.map((q:any,index:number)=><article className="question-card" key={q.id}><div className="question-meta"><span>QUESTION {index+1}</span><b>{q.marks} mark{q.marks === 1 ? '' : 's'}</b></div><h2>{q.prompt}</h2>{q.type === 'MCQ' ? <div className="option-list">{String(q.options || '').split('|').map((option:string,i:number)=>{const value=option.trim(); return value ? <label className={answers[q.id] === value ? 'option selected' : 'option'} key={i}><input type="radio" name={q.id} checked={answers[q.id] === value} onChange={()=>void saveAnswer(q.id,value)} />{value}</label> : null;})}</div> : <textarea className="answer-box" value={answers[q.id] || ''} onChange={e=>void saveAnswer(q.id,e.target.value)} placeholder="Type your answer here..." />}</article>)}</div><div className="exam-submit"><span>Answers are saved automatically.</span><button className="primary" disabled={examLoading} onClick={()=>void submitExam()}>{examLoading ? 'Submitting…' : 'Submit exam →'}</button></div></>}</section>}
+      {view === 'exam' && currentUser?.role === 'STUDENT' && activeExam && activeAttempt && <section className="page workspace exam-page"><div className="page-heading"><div><span className="eyebrow">LIVE EXAMINATION</span><h1>{activeExam.title}</h1><p>{activeExam.subject} · {activeExam.questions.length} questions · {currentUser.name}</p></div><div className="exam-monitor"><span className={"monitor-level monitor-" + anomalyLevel.toLowerCase()}>● {anomalyLevel}</span><small>{anomalyScore}/100 signal score</small></div><div className="exam-timer">{Math.floor(remainingSeconds / 60).toString().padStart(2,'0')}:{(remainingSeconds % 60).toString().padStart(2,'0')}</div></div>{examError && <div className="join-feedback error">{examError}</div>}{examMessage ? <div className="join-feedback success">{examMessage}<button className="secondary" onClick={()=>navigate('student')}>Return to dashboard</button></div> : <><div className="exam-questions">{activeExam.questions.map((q:any,index:number)=><article className="question-card" key={q.id}><div className="question-meta"><span>QUESTION {index+1}</span><b>{q.marks} mark{q.marks === 1 ? '' : 's'}</b></div><h2>{q.prompt}</h2>{q.type === 'MCQ' ? <div className="option-list">{String(q.options || '').split('|').map((option:string,i:number)=>{const value=option.trim(); return value ? <label className={answers[q.id] === value ? 'option selected' : 'option'} key={i}><input type="radio" name={q.id} checked={answers[q.id] === value} onChange={()=>void saveAnswer(q.id,value)} />{value}</label> : null;})}</div> : <textarea className="answer-box" value={answers[q.id] || ''} onChange={e=>void saveAnswer(q.id,e.target.value)} placeholder="Type your answer here..." />}</article>)}</div><div className="exam-submit"><span>Answers are saved automatically.</span><button className="primary" disabled={examLoading} onClick={()=>void submitExam()}>{examLoading ? 'Submitting…' : 'Submit exam →'}</button></div></>}</section>}
 
       {view === 'student-history' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">PAST EXAMS</span><h1>Your examination history.</h1><p>Review the tests you have completed and the results recorded for each attempt.</p></div><button className="secondary" onClick={()=>void loadStudentHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading past exams…</p></div> : studentHistory.length === 0 ? <div className="data-card"><p>You have no completed exams yet.</p></div> : <div className="history-list">{studentHistory.map((attempt:any)=><article className="history-card student-history-card" key={attempt.id}><div><span className="label">PAST EXAM</span><h2>{attempt.exam.title}</h2><p>{attempt.exam.subject} · Faculty: {attempt.exam.faculty.name}</p></div><div className="student-result-grid"><div><span>STATUS</span><b>{attempt.status}</b></div><div><span>SCORE</span><b>{attempt.score ?? 0}</b></div><div><span>ANOMALY</span><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel}</b></div><div><span>SUBMITTED</span><b>{attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : '—'}</b></div></div></article>)}</div>}</section>}
 
