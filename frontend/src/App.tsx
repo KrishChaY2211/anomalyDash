@@ -361,7 +361,7 @@ function App() {
     let cancelled = false;
     const loadMonitoring = async () => {
       try {
-        const response = await fetch('/api/exams/' + selectedExam.id + '/monitoring');
+        const response = await fetch('/api/exams/' + selectedExam.id + '/monitoring?facultyId=' + encodeURIComponent(currentUser?.id || ''));
         if (!response.ok) return;
         const data = await response.json();
         if (!cancelled) setLiveMonitoring(data);
