@@ -288,3 +288,26 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
 @media (max-width: 560px) {
   .app-shell .accessibility-wrap { right: 14px; bottom: 14px; }
 }
+
+
+/* Phase 5: faculty-configurable anomaly thresholds and explainable evidence. */
+.app-shell .threshold-config { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:4px 0 14px; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-soft); }
+.app-shell .threshold-config > .label,.app-shell .threshold-config > p,.app-shell .threshold-error { grid-column:1 / -1; margin:0; }
+.app-shell .threshold-config > p,.app-shell .threshold-config .threshold-error { color:var(--muted); font-size:12px; }
+.app-shell .threshold-config .threshold-error { color:var(--danger); }
+.app-shell .threshold-config label { display:flex; flex-direction:column; gap:6px; color:var(--muted); font-size:12px; }
+.app-shell .threshold-config input { width:100%; min-width:0; box-sizing:border-box; padding:9px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); }
+.app-shell .monitoring-threshold-summary { color:var(--muted); font-size:12px; padding:8px 12px; border:1px solid var(--line); border-radius:9px; }
+.app-shell .monitoring-threshold-summary b { color:var(--text); }
+.app-shell .evidence-toggle { padding:7px 10px; white-space:nowrap; }
+.app-shell .evidence-cell { padding:0 !important; background:var(--surface-soft); border-bottom:1px solid var(--line); }
+.app-shell .evidence-panel { padding:18px 22px; color:var(--text); }
+.app-shell .evidence-panel > strong { display:block; margin-bottom:12px; }
+.app-shell .evidence-panel ol { list-style:none; margin:0; padding:0; border-left:2px solid var(--line); }
+.app-shell .evidence-panel li { position:relative; margin:0 0 0 14px; padding:0 0 16px 10px; }
+.app-shell .evidence-panel li::before { content:''; position:absolute; width:8px; height:8px; left:-19px; top:5px; border-radius:50%; background:var(--accent); }
+.app-shell .evidence-panel li div { display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; }
+.app-shell .evidence-panel li time,.app-shell .evidence-panel li p,.app-shell .evidence-disclaimer { color:var(--muted); font-size:12px; }
+.app-shell .evidence-panel li p { margin:4px 0 0; overflow-wrap:anywhere; }
+.app-shell .evidence-disclaimer { margin:8px 0 0; }
+@media (max-width:560px) { .app-shell .threshold-config { grid-template-columns:1fr; } }
