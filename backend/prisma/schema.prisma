@@ -92,6 +92,7 @@ model ExamAttempt {
   exam        Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
   student     User          @relation(fields: [studentId], references: [id])
   answers     AttemptAnswer[]
+  monitoringEvents MonitoringEvent[]
   @@unique([examId, studentId])
 }
 
@@ -104,4 +105,15 @@ model AttemptAnswer {
   attempt    ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
   @@unique([attemptId, questionId])
+}
+
+
+model MonitoringEvent {
+  id        String      @id @default(cuid())
+  attemptId String
+  type      String
+  metadata  String?
+  createdAt DateTime    @default(now())
+  attempt   ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  @@index([attemptId, createdAt])
 }
