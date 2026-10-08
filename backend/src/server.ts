@@ -267,7 +267,7 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
   try {
     const user = authUser(req);
     const { type, metadata } = req.body;
-    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
+    const allowed = ['TAB_HIDDEN','TAB_VISIBLE','WINDOW_BLUR','WINDOW_FOCUS','FOCUS_LOST','FOCUS_REGAINED','PASTE','COPY','RAPID_ANSWERS','LONG_IDLE','FULLSCREEN_EXIT','OFFLINE','ONLINE','ANSWER_STARTED','ANSWER_CHANGED','ANSWER_SUBMITTED','SKIPPED_QUESTION'];
     if (!allowed.includes(String(type))) return res.status(400).json({ message: 'Invalid monitoring event' });
     const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } } } });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
@@ -301,10 +301,10 @@ app.get('/api/attempts/:id/monitoring', async (req, res) => {
     const user = authUser(req);
     const attempt = await prisma.examAttempt.findUnique({
       where: { id: req.params.id },
-      include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, questions: { select: { id: true } } } } }
+      include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, facultyId: true, questions: { select: { id: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
-    if (user?.role === 'STUDENT' ? attempt.studentId !== user.id : user?.role !== 'FACULTY' || attempt.examId === '') return res.status(403).json({ message: 'You cannot view this monitoring record' });
+    if (user?.role === 'STUDENT' ? attempt.studentId !== user.id : user?.role !== 'FACULTY' || attempt.exam.facultyId !== user.id) return res.status(403).json({ message: 'You cannot view this monitoring record' });
     const features = buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length);
     return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features });
   } catch (error) {
