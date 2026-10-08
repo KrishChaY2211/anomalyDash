@@ -13,4 +13,4 @@ AnomalyDash is a web-based online examination platform designed to help colleges
 
 ## Team
 
-Hackathon project by the AnomalyDash team.
+**CodeMatriX**
