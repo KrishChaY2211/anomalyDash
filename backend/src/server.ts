@@ -454,6 +454,8 @@ app.delete('/api/exams/:id', async (req, res) => {
 });
 
 app.post('/api/exams/join', async (req, res) => {
+  const user = authUser(req);
+  if (user?.role !== 'STUDENT') return res.status(403).json({ message: 'Student access required to join an exam' });
   const { testUrl, joinCode } = req.body;
   const normalizedCode = String(joinCode ?? '').trim().toUpperCase();
   if (!testUrl || !normalizedCode) return res.status(400).json({ message: 'Test URL and test code are required' });
