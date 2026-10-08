@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 
 type View = 'home' | 'login' | 'faculty' | 'student';
 type Role = 'faculty' | 'student';
+type AuthMode = 'signin' | 'signup';
 
 type Exam = {
   id: string;
@@ -12,13 +13,6 @@ type Exam = {
   _count?: { questions: number };
 };
 
-const pipeline = [
-  ['01', 'Online Examination', 'Questions, timer and secure answer collection'],
-  ['02', 'Behaviour Signals', 'Focus, visibility, timing and paste metadata'],
-  ['03', 'Anomaly Analysis', 'Evidence rules + statistical / ML analysis'],
-  ['04', 'Faculty Intelligence', 'Live prioritization and explainable incidents'],
-];
-
 function getInitialView(): View {
   const hash = window.location.hash.replace('#/', '');
   return hash === 'faculty' || hash === 'student' || hash === 'login' ? hash : 'home';
@@ -27,17 +21,28 @@ function getInitialView(): View {
 function App() {
   const [view, setView] = useState<View>(getInitialView);
   const [role, setRole] = useState<Role>('student');
+  const [authMode, setAuthMode] = useState<AuthMode>('signin');
   const [dbStatus, setDbStatus] = useState('checking');
   const [examCount, setExamCount] = useState(0);
   const [exams, setExams] = useState<Exam[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: '', subject: '', durationMin: '60' });
-  const statusLabel = dbStatus === 'connected' ? 'Database connected' : dbStatus === 'checking' ? 'Checking database' : 'Database offline';
+
+  const statusLabel = dbStatus === 'connected'
+    ? 'Database connected'
+    : dbStatus === 'checking'
+      ? 'Checking database'
+      : 'Database offline';
 
   const navigate = (nextView: View) => {
     window.location.hash = nextView === 'home' ? '' : nextView;
     setView(nextView);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openAuth = (mode: AuthMode) => {
+    setAuthMode(mode);
+    navigate('login');
   };
 
   const loadData = async () => {
@@ -88,9 +93,10 @@ function App() {
     }
   };
 
-  const chooseRole = (nextRole: Role) => { setRole(nextRole); navigate('login'); };
-
-  const handleLogin = (event: FormEvent) => { event.preventDefault(); navigate(role); };
+  const handleAuth = (event: FormEvent) => {
+    event.preventDefault();
+    navigate(role);
+  };
 
   return (
     <main className="app-shell">
@@ -115,8 +121,7 @@ function App() {
               <h1>Exams, made<br /><em>more intelligent.</em></h1>
               <p>AnomalyDash helps colleges conduct online examinations while turning unusual behaviour and answering patterns into explainable signals for faculty review.</p>
               <div className="hero-actions">
-                <button className="primary" onClick={() => navigate('login')}>Sign in to AnomalyDash <span>→</span></button>
-                <button className="secondary" onClick={() => chooseRole('student')}>Student access</button>
+                <button className="primary" onClick={() => openAuth('signin')}>Get Started <span>→</span></button>
               </div>
               <div className="trust-line"><span>●</span> Faculty stays in control · Minimum-data monitoring · No webcam required</div>
             </div>
@@ -138,28 +143,49 @@ function App() {
             <article className="overview-card"><span className="card-number">02</span><h2>Observe meaningful signals.</h2><p>Focus changes, visibility events, timing shifts and paste metadata are captured without webcam or microphone surveillance.</p></article>
             <article className="overview-card"><span className="card-number">03</span><h2>Investigate, don't assume.</h2><p>Combined evidence highlights unusual sessions while keeping the final decision with faculty.</p></article>
           </section>
-          <section className="access-section">
-            <div><span className="eyebrow">SECURE ROLE-BASED ACCESS</span><h2>Who are you signing in as?</h2><p>Choose your role to enter the appropriate AnomalyDash workspace.</p></div>
-            <div className="role-cards">
-              <button className="role-card" onClick={() => chooseRole('faculty')}><span>FACULTY</span><strong>Manage examinations</strong><p>Create exams, monitor sessions and review anomaly evidence.</p><b>Faculty sign in →</b></button>
-              <button className="role-card" onClick={() => chooseRole('student')}><span>STUDENT</span><strong>Take examinations</strong><p>Access assigned examinations and submit answers securely.</p><b>Student sign in →</b></button>
-            </div>
-          </section>
         </>
       )}
 
       {view === 'login' && (
         <section className="auth-page">
           <div className="auth-card">
-            <span className="eyebrow">ANOMALYDASH ACCESS</span><h1>Sign in</h1>
-            <p className="auth-subtitle">Continue as {role === 'faculty' ? 'Faculty' : 'Student'} to open your workspace.</p>
-            <div className="role-switch"><button className={role === 'faculty' ? 'selected' : ''} onClick={() => setRole('faculty')}>Faculty</button><button className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}>Student</button></div>
-            <form onSubmit={handleLogin}>
+            <span className="eyebrow">ANOMALYDASH ACCESS</span>
+            <h1>{authMode === 'signin' ? 'Welcome back' : 'Create your account'}</h1>
+            <p className="auth-subtitle">
+              {authMode === 'signin'
+                ? 'Sign in to continue to your AnomalyDash workspace.'
+                : 'Create your AnomalyDash account to get started.'}
+            </p>
+
+            <div className="role-switch">
+              <button className={authMode === 'signin' ? 'selected' : ''} onClick={() => setAuthMode('signin')}>Sign In</button>
+              <button className={authMode === 'signup' ? 'selected' : ''} onClick={() => setAuthMode('signup')}>Sign Up</button>
+            </div>
+
+            <div className="role-switch">
+              <button className={role === 'faculty' ? 'selected' : ''} onClick={() => setRole('faculty')}>Faculty</button>
+              <button className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}>Student</button>
+            </div>
+
+            <form onSubmit={handleAuth}>
+              {authMode === 'signup' && (
+                <label>Full name<input type="text" required placeholder="Enter your full name" /></label>
+              )}
               <label>Email address<input type="email" required placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label>
               <label>Password<input type="password" required placeholder="Enter your password" /></label>
-              <button className="primary full" type="submit">Continue as {role === 'faculty' ? 'Faculty' : 'Student'} <span>→</span></button>
+              {authMode === 'signup' && (
+                <label>Confirm password<input type="password" required placeholder="Confirm your password" /></label>
+              )}
+              <button className="primary full" type="submit">
+                {authMode === 'signin' ? 'Sign in' : 'Create account'} as {role === 'faculty' ? 'Faculty' : 'Student'} <span>→</span>
+              </button>
             </form>
-            <p className="auth-note">Authentication service is the next application layer. This role-based entry flow is ready for integration.</p>
+
+            <p className="auth-note">
+              {authMode === 'signin'
+                ? 'Authentication service is the next application layer. This role-based entry flow is ready for integration.'
+                : 'Account creation UI is ready for integration with the backend authentication service.'}
+            </p>
             <button className="back-link" onClick={() => navigate('home')}>← Back to overview</button>
           </div>
         </section>
