@@ -334,9 +334,9 @@ app.post('/api/exams/join', async (req, res) => {
 
 app.post('/api/exams', async (req, res) => {
   const { title, subject, durationMin, facultyId } = req.body;
-  const lowThreshold = Number(req.body.lowThreshold ?? 10);
-  const mediumThreshold = Number(req.body.mediumThreshold ?? 30);
-  const highThreshold = Number(req.body.highThreshold ?? 60);
+  const lowThreshold = Number(req.body.lowThreshold ?? 30);
+  const mediumThreshold = Number(req.body.mediumThreshold ?? 60);
+  const highThreshold = Number(req.body.highThreshold ?? 80);
   if (!title || !subject || !Number.isInteger(Number(durationMin)) || Number(durationMin) < 1 || Number(durationMin) > 300) return res.status(400).json({ message: 'A title, subject and duration from 1 to 300 minutes are required' });
   if (![lowThreshold, mediumThreshold, highThreshold].every(value => Number.isInteger(value) && value >= 1 && value <= 100) || !(lowThreshold < mediumThreshold && mediumThreshold < highThreshold)) {
     return res.status(400).json({ message: 'Thresholds must be whole numbers from 1 to 100 in ascending order: low < medium < high' });
