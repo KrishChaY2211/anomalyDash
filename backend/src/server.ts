@@ -36,7 +36,7 @@ const readSession = (token: string): AuthClaims | null => {
   } catch { return null; }
 };
 
-app.use(cors({ origin: process.env.FRONTEND_ORIGIN ? process.env.FRONTEND_ORIGIN.split(',').map(value => value.trim()) : false }));
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN ? process.env.FRONTEND_ORIGIN.split(',').map(value => value.trim()) : ['http://localhost:5173'] }));
 app.use(express.json({ limit: '32kb' }));
 
 // Public endpoints are deliberately limited to authentication and health checks.
@@ -181,7 +181,7 @@ app.get('/api/health', (_req, res) => { res.json({ status: 'ok', service: 'anoma
 
 app.get('/api/db/health', async (_req, res) => {
   try { await prisma.$queryRaw`SELECT 1`; const [users, exams, questions] = await Promise.all([prisma.user.count(), prisma.exam.count(), prisma.question.count()]);
-    res.json({ status: 'connected', database: 'sqlite', users, exams, questions });
+    res.json({ status: 'connected', database: 'postgresql', users, exams, questions });
   } catch (error) { console.error(error); res.status(503).json({ status: 'disconnected', database: 'sqlite' }); }
 });
 
