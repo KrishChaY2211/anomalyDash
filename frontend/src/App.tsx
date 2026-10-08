@@ -26,11 +26,13 @@ function getInitialView(): View {
 
 function App() {
   const [view, setView] = useState<View>(getInitialView);
+  const [role, setRole] = useState<Role>('student');
   const [dbStatus, setDbStatus] = useState('checking');
   const [examCount, setExamCount] = useState(0);
   const [exams, setExams] = useState<Exam[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: '', subject: '', durationMin: '60' });
+  const statusLabel = dbStatus === 'connected' ? 'Database connected' : dbStatus === 'checking' ? 'Checking database' : 'Database offline';
 
   const navigate = (nextView: View) => {
     window.location.hash = nextView === 'home' ? '' : nextView;
