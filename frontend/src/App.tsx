@@ -134,7 +134,7 @@ function App() {
     try {
       const response = await fetch(`/api/exams/${selectedExam.id}/questions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...questionForm, marks: Number(questionForm.marks), options: questionForm.type === 'MCQ' ? questionForm.options.split('|').map(option => option.trim()).filter(Boolean).join('|') : '', answerKey: questionForm.type === 'MCQ' ? (questionForm.options.split('|').map(option => option.trim()).filter(Boolean)[['A','B','C','D'].indexOf(questionForm.answerKey)] || '') : questionForm.answerKey })
+        body: JSON.stringify({ ...questionForm, marks: Number(questionForm.marks), options: questionForm.type === 'MCQ' ? questionForm.options.split('|').map(option => option.trim()).filter(Boolean).join('|') : '', answerKey: questionForm.type === 'MCQ' ? (questionForm.options.split('|').map(option => option.trim())[['A','B','C','D'].indexOf(questionForm.answerKey)] || '') : questionForm.answerKey })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not add question');
