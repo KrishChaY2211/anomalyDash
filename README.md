@@ -443,3 +443,49 @@ See [docs/PHASE-1.md](docs/PHASE-1.md) for the foundation definition of done.
 | Anomaly engine | To be introduced after event/feature design |
 
 The implementation will keep the interface language established in Phase 1 as the product grows into the student exam and faculty monitoring workflows.
+
+## Phase 2 — Database Integration
+
+Phase 2 connects the product shell to persistent application data using **SQLite + Prisma**.
+
+### Database-backed flow
+
+```text
+Faculty UI
+   ↓
+React / TypeScript
+   ↓
+Express API
+   ↓
+Prisma ORM
+   ↓
+SQLite database
+   ↓
+Users → Exams → Questions
+```
+
+The current demo persists faculty and exam records, exposes database health/record counts, lists exams from the database, and can create a new exam record from the UI. This replaces static-only exam data with a real application-data loop.
+
+### Run Phase 2
+
+```bash
+cd backend
+npm install
+cp .env.example .env
+npm run db:generate
+npm run db:push
+npm run db:seed
+npm run dev
+```
+
+Then in another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` and verify the **SQLite + Prisma connected** status and database-backed exam list.
+
+> Note: the local SQLite database file is generated during setup and should not be committed to Git.
