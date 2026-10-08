@@ -220,14 +220,7 @@ function App() {
         </section>
       )}
 
-      <section className="principles">
-        <div><span className="eyebrow">ENGINEERING PRINCIPLES</span><h2>Professional by design.<br />Responsible by default.</h2></div>
-        <div className="principle-list">
-          <div><strong>01</strong><span>Explainable anomalies</span></div><div><strong>02</strong><span>Faculty-in-the-loop decisions</span></div><div><strong>03</strong><span>Minimal examination data</span></div><div><strong>04</strong><span>Modular, testable architecture</span></div>
-        </div>
-      </section>
-
-      <footer><span>AnomalyDash · CodeMatriX · Hackathon MVP</span><span>Phase 02 · Database v0.2</span></footer>
+      <footer><span>AnomalyDash · CodeMatriX</span><span>Intelligent online examination platform</span></footer>
     </main>
   );
 }
