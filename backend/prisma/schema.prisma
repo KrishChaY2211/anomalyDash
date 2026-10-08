@@ -32,6 +32,7 @@ model User {
   role      UserRole
   createdAt DateTime @default(now())
   exams     Exam[]   @relation("FacultyExams")
+  attempts  ExamAttempt[]
 }
 
 model Exam {
@@ -47,6 +48,7 @@ model Exam {
   questions   Question[]
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  attempts    ExamAttempt[]
 }
 
 model Question {
@@ -59,4 +61,38 @@ model Question {
   options    String?
   answerKey  String?
   createdAt  DateTime     @default(now())
+  attemptAnswers AttemptAnswer[]
+}
+
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+}
+
+model ExamAttempt {
+  id          String        @id @default(cuid())
+  examId      String
+  studentId   String
+  startedAt   DateTime      @default(now())
+  expiresAt   DateTime
+  submittedAt DateTime?
+  status      AttemptStatus @default(IN_PROGRESS)
+  score       Int?
+  exam        Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student     User          @relation(fields: [studentId], references: [id])
+  answers     AttemptAnswer[]
+  @@unique([examId, studentId])
+}
+
+model AttemptAnswer {
+  id         String      @id @default(cuid())
+  attemptId  String
+  questionId String
+  answer     String
+  updatedAt  DateTime    @updatedAt
+  attempt    ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  @@unique([attemptId, questionId])
 }
