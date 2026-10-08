@@ -31,11 +31,8 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://anomalydash-web.onrender.com
 
-  - type: web
-    runtime: static
+  - type: static
     name: anomalydash-web
-    plan: free
-    region: singapore
     repo: https://github.com/KrishChaY2211/anomalyDash
     branch: security/deployment-readiness
     autoDeploy: false
