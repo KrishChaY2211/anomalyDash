@@ -50,7 +50,7 @@ export function extractFeatures(
   const averageResponseMs = responseTimes.length ? responseTimes.reduce((sum, n) => sum + n, 0) / responseTimes.length : 0;
   const responseTimeDeviationMs = responseTimes.length
     ? Math.sqrt(responseTimes.reduce((sum, n) => sum + (n - averageResponseMs) ** 2, 0) / responseTimes.length) : 0;
-  const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : 0;
+  const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt instanceof Date ? startedAt.getTime() : startedAt).getTime()) : 0;
 
   return {
     questionCount,
