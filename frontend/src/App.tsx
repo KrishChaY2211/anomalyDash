@@ -56,7 +56,18 @@ function App() {
   const [authSuccess, setAuthSuccess] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try { return JSON.parse(localStorage.getItem('anomalydash_user') || 'null'); } catch { return null; }
+    try {
+      // Old client-only profiles are not authenticated server sessions.
+      if (!localStorage.getItem('anomalydash_token')) {
+        localStorage.removeItem('anomalydash_user');
+        return null;
+      }
+      return JSON.parse(localStorage.getItem('anomalydash_user') || 'null');
+    } catch {
+      localStorage.removeItem('anomalydash_user');
+      localStorage.removeItem('anomalydash_token');
+      return null;
+    }
   });
   const [creating, setCreating] = useState(false);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
