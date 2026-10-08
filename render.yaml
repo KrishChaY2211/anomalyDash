@@ -31,7 +31,8 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://anomalydash-web.onrender.com
 
-  - type: static
+  - type: web
+    runtime: static
     name: anomalydash-web
     repo: https://github.com/KrishChaY2211/anomalyDash
     branch: security/deployment-readiness
