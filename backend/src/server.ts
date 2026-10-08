@@ -37,6 +37,7 @@ const readSession = (token: string): AuthClaims | null => {
   } catch { return null; }
 };
 
+app.set('trust proxy', 1);
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN ? process.env.FRONTEND_ORIGIN.split(',').map(value => value.trim()) : ['http://localhost:5173'] }));
 app.use(express.json({ limit: '32kb' }));
 
@@ -184,9 +185,9 @@ app.post('/api/auth/signin', signinLimiter, async (req, res) => {
 app.get('/api/health', (_req, res) => { res.json({ status: 'ok', service: 'anomalydash-api', version: '0.2.0', phase: 'database-integration', timestamp: new Date().toISOString() }); });
 
 app.get('/api/db/health', async (_req, res) => {
-  try { await prisma.$queryRaw`SELECT 1`; const [users, exams, questions] = await Promise.all([prisma.user.count(), prisma.exam.count(), prisma.question.count()]);
-    res.json({ status: 'connected', database: 'postgresql', users, exams, questions });
-  } catch (error) { console.error(error); res.status(503).json({ status: 'disconnected', database: 'sqlite' }); }
+  const database = process.env.DATABASE_URL?.startsWith('file:') ? 'sqlite' : 'postgresql';
+  try { await prisma.$queryRaw`SELECT 1`; res.json({ status: 'connected', database }); }
+  catch { res.status(503).json({ status: 'disconnected', database }); }
 });
 
 app.get('/api/faculty/:facultyId/history', async (req, res) => {
