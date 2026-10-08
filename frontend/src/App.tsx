@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 
-type View = 'home' | 'login' | 'faculty' | 'student' | 'exam';
+type View = 'home' | 'login' | 'faculty' | 'student' | 'exam' | 'faculty-history' | 'student-history';
 type Role = 'faculty' | 'student';
 type AuthMode = 'signin' | 'signup';
 
@@ -23,6 +23,8 @@ function getInitialView(): View {
   if (hash === 'student') return 'student';
   if (hash === 'login') return 'login';
   if (hash === 'exam' || hash.startsWith('exam/')) return 'exam';
+  if (hash === 'faculty-history') return 'faculty-history';
+  if (hash === 'student-history') return 'student-history';
   return 'home';
 }
 
@@ -56,6 +58,9 @@ function App() {
   const [examLoading, setExamLoading] = useState(false);
   const [examMessage, setExamMessage] = useState('');
   const [examError, setExamError] = useState('');
+  const [facultyHistory, setFacultyHistory] = useState<any[]>([]);
+  const [studentHistory, setStudentHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const statusLabel = dbStatus === 'connected' ? 'Database connected' : dbStatus === 'checking' ? 'Checking database' : 'Database offline';
 
@@ -247,6 +252,30 @@ function App() {
     return () => window.clearInterval(timer);
   }, [activeAttempt?.id, activeAttempt?.expiresAt, activeAttempt?.status]);
 
+  const loadFacultyHistory = async () => {
+    if (!currentUser || currentUser.role !== 'FACULTY') return;
+    setHistoryLoading(true);
+    try {
+      const response = await fetch(`/api/faculty/${currentUser.id}/history`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not load history');
+      setFacultyHistory(data);
+    } catch (error) { alert(error instanceof Error ? error.message : 'Could not load history'); }
+    finally { setHistoryLoading(false); }
+  };
+
+  const loadStudentHistory = async () => {
+    if (!currentUser || currentUser.role !== 'STUDENT') return;
+    setHistoryLoading(true);
+    try {
+      const response = await fetch(`/api/students/${currentUser.id}/history`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not load history');
+      setStudentHistory(data);
+    } catch (error) { alert(error instanceof Error ? error.message : 'Could not load history'); }
+    finally { setHistoryLoading(false); }
+  };
+
   const logout = () => { localStorage.removeItem('anomalydash_user'); setCurrentUser(null); navigate('home'); };
 
   return (
@@ -255,8 +284,8 @@ function App() {
         <button className="brand brand-button" onClick={() => navigate('home')}><div className="brand-mark">A</div><div><strong>AnomalyDash</strong><span>by CodeMatriX</span></div></button>
         <div className="nav-actions">
           <button className={`nav-link ${view === 'home' ? 'active' : ''}`} onClick={() => navigate('home')}>Overview</button>
-          {currentUser?.role === 'FACULTY' && <button className={`nav-link ${view === 'faculty' ? 'active' : ''}`} onClick={() => navigate('faculty')}>Faculty</button>}
-          {currentUser?.role === 'STUDENT' && <button className={`nav-link ${view === 'student' ? 'active' : ''}`} onClick={() => navigate('student')}>Student</button>}
+          {currentUser?.role === 'FACULTY' && <><button className={`nav-link ${view === 'faculty' ? 'active' : ''}`} onClick={() => navigate('faculty')}>Faculty</button><button className={`nav-link ${view === 'faculty-history' ? 'active' : ''}`} onClick={() => { navigate('faculty-history'); void loadFacultyHistory(); }}>History</button></>}
+          {currentUser?.role === 'STUDENT' && <><button className={`nav-link ${view === 'student' ? 'active' : ''}`} onClick={() => navigate('student')}>Student</button><button className={`nav-link ${view === 'student-history' ? 'active' : ''}`} onClick={() => { navigate('student-history'); void loadStudentHistory(); }}>Past Exams</button></>}
           {currentUser && <button className="nav-link" onClick={logout}>Sign out</button>}
           <span className="nav-status"><span className={`status-dot ${dbStatus === 'connected' ? 'db-online' : ''}`} />{statusLabel}</span>
         </div>
@@ -269,7 +298,11 @@ function App() {
       {view === 'faculty' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-heading"><div><span className="eyebrow">FACULTY DASHBOARD</span><h1>Create and publish tests.</h1><p>Welcome, {currentUser.name}. Build a test, add questions, then publish it to generate a student-ready join flow.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="workspace-grid"><form className="form-card" onSubmit={createExam}><span className="label">PHASE 3 · TEST BUILDER</span><h2>New test</h2><p>Create the examination record first. A unique test code and URL are generated automatically.</p><label>Test name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Data Structures Mid Term" /></label><label>Subject<input required value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="e.g. Data Structures" /></label><label>Duration (minutes)<input type="number" min="1" max="300" required value={form.durationMin} onChange={e=>setForm({...form,durationMin:e.target.value})} /></label><button className="primary full" disabled={creating || dbStatus !== 'connected'}>{creating ? 'Creating test…' : 'Create new test →'}</button></form><div className="data-card"><div className="data-card-heading"><div><span className="label">MY TESTS</span><h2>{exams.filter(e=>e.status !== 'COMPLETED').length} records</h2></div><span className="connected-badge">{dbStatus === 'connected' ? 'CONNECTED' : 'OFFLINE'}</span></div>{exams.filter(e=>!currentUser || true).map(exam=><div className={`exam-row ${selectedExam?.id === exam.id ? 'selected-row' : ''}`} key={exam.id} onClick={()=>setSelectedExam(exam)}><div><strong>{exam.title}</strong><span>{exam.subject} · {exam.durationMin} min · {exam._count?.questions ?? 0} questions</span>{exam.joinCode && <small>Code: <b>{exam.joinCode}</b></small>}</div><b>{exam.status}</b></div>)}</div></div>{selectedExam && <section className="builder-panel"><div className="builder-head"><div><span className="label">TEST CONFIGURATION</span><h2>{selectedExam.title}</h2><p>{selectedExam.status === 'LIVE' ? 'This test is live. Students can join using the code and URL below.' : 'Add at least one question, then publish this test.'}</p></div><div className="test-credentials"><span>TEST CODE <b>{selectedExam.joinCode}</b></span><span>TEST URL <b>{selectedExam.accessUrl}</b></span></div></div><form className="question-form" onSubmit={addQuestion}><label>Question type<select value={questionForm.type} onChange={e=>setQuestionForm({...questionForm,type:e.target.value})}><option value="MCQ">Multiple choice</option><option value="DESCRIPTIVE">Descriptive</option></select></label><label>Question<input required value={questionForm.prompt} onChange={e=>setQuestionForm({...questionForm,prompt:e.target.value})} placeholder="Enter the question" /></label><label>Marks<input type="number" min="1" required value={questionForm.marks} onChange={e=>setQuestionForm({...questionForm,marks:e.target.value})} /></label>{questionForm.type === 'MCQ' && <><label>Options<input value={questionForm.options} onChange={e=>setQuestionForm({...questionForm,options:e.target.value})} placeholder="Option A | Option B | Option C | Option D" /></label><label>Answer key<input value={questionForm.answerKey} onChange={e=>setQuestionForm({...questionForm,answerKey:e.target.value})} placeholder="e.g. A" /></label></>}<button className="primary" disabled={addingQuestion}>{addingQuestion ? 'Adding…' : 'Add question'}</button></form><div className="builder-footer"><span>{selectedExam._count?.questions ?? 0} question(s) added</span><button className="primary" disabled={publishing || endingExam || selectedExam.status === 'LIVE' || selectedExam.status === 'COMPLETED'} onClick={publishExam}>{selectedExam.status === 'LIVE' ? 'Test published ✓' : publishing ? 'Publishing…' : 'Publish test →'}</button>
 {selectedExam.status === 'LIVE' && <button type="button" className="secondary danger-action" disabled={endingExam} onClick={()=>void endLiveSession()}>{endingExam ? 'Ending session…' : 'End live session'}</button>}</div></section>}</section>}
 
+      {view === 'faculty-history' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-heading"><div><span className="eyebrow">FACULTY HISTORY</span><h1>Past examinations.</h1><p>Review completed tests, participating students, scores and recorded anomaly signals.</p></div><button className="secondary" onClick={()=>void loadFacultyHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading examination history…</p></div> : facultyHistory.length === 0 ? <div className="data-card"><p>No completed examinations yet.</p></div> : <div className="history-list">{facultyHistory.map((exam:any)=><article className="history-card" key={exam.id}><div className="history-card-head"><div><span className="label">COMPLETED TEST</span><h2>{exam.title}</h2><p>{exam.subject} · {exam.durationMin} min · {exam.attempts.length} student attempt(s)</p></div><span className="history-status">COMPLETED</span></div><div className="history-attempts">{exam.attempts.length === 0 ? <p>No student attempts recorded.</p> : exam.attempts.map((attempt:any)=><div className="history-attempt" key={attempt.id}><div><strong>{attempt.student.name}</strong><span>{attempt.student.rollNumber || attempt.student.email}</span></div><div><b>{attempt.score ?? 0} marks</b><span>{attempt.status}</span></div><div><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel} · {attempt.anomalyScore}</b><span>Anomaly score</span></div></div>)}</div></article>)}</div>}</section>}
+
       {view === 'exam' && currentUser?.role === 'STUDENT' && activeExam && activeAttempt && <section className="page workspace exam-page"><div className="page-heading"><div><span className="eyebrow">LIVE EXAMINATION</span><h1>{activeExam.title}</h1><p>{activeExam.subject} · {activeExam.questions.length} questions · {currentUser.name}</p></div><div className="exam-timer">{Math.floor(remainingSeconds / 60).toString().padStart(2,'0')}:{(remainingSeconds % 60).toString().padStart(2,'0')}</div></div>{examError && <div className="join-feedback error">{examError}</div>}{examMessage ? <div className="join-feedback success">{examMessage}<button className="secondary" onClick={()=>navigate('student')}>Return to dashboard</button></div> : <><div className="exam-questions">{activeExam.questions.map((q:any,index:number)=><article className="question-card" key={q.id}><div className="question-meta"><span>QUESTION {index+1}</span><b>{q.marks} mark{q.marks === 1 ? '' : 's'}</b></div><h2>{q.prompt}</h2>{q.type === 'MCQ' ? <div className="option-list">{String(q.options || '').split('|').map((option:string,i:number)=>{const value=option.trim(); return value ? <label className={answers[q.id] === value ? 'option selected' : 'option'} key={i}><input type="radio" name={q.id} checked={answers[q.id] === value} onChange={()=>void saveAnswer(q.id,value)} />{value}</label> : null;})}</div> : <textarea className="answer-box" value={answers[q.id] || ''} onChange={e=>void saveAnswer(q.id,e.target.value)} placeholder="Type your answer here..." />}</article>)}</div><div className="exam-submit"><span>Answers are saved automatically.</span><button className="primary" disabled={examLoading} onClick={()=>void submitExam()}>{examLoading ? 'Submitting…' : 'Submit exam →'}</button></div></>}</section>}
+
+      {view === 'student-history' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-heading"><div><span className="eyebrow">PAST EXAMS</span><h1>Your examination history.</h1><p>Review the tests you have completed and the results recorded for each attempt.</p></div><button className="secondary" onClick={()=>void loadStudentHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading past exams…</p></div> : studentHistory.length === 0 ? <div className="data-card"><p>You have no completed exams yet.</p></div> : <div className="history-list">{studentHistory.map((attempt:any)=><article className="history-card student-history-card" key={attempt.id}><div><span className="label">PAST EXAM</span><h2>{attempt.exam.title}</h2><p>{attempt.exam.subject} · Faculty: {attempt.exam.faculty.name}</p></div><div className="student-result-grid"><div><span>STATUS</span><b>{attempt.status}</b></div><div><span>SCORE</span><b>{attempt.score ?? 0}</b></div><div><span>ANOMALY</span><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel}</b></div><div><span>SUBMITTED</span><b>{attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : '—'}</b></div></div></article>)}</div>}</section>}
 
       {view === 'student' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-heading"><div><span className="eyebrow">STUDENT DASHBOARD</span><h1>Join your test.</h1><p>Welcome, {currentUser.name}. Enter the test URL and code shared by your faculty to continue.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="join-layout"><form className="join-card" onSubmit={handleJoin}><span className="label">PHASE 2 · TEST ACCESS</span><h2>Enter test details</h2><p>Use the exact URL and test code provided by your faculty.</p><label>Test URL<input required value={joinForm.testUrl} onChange={e=>setJoinForm({...joinForm,testUrl:e.target.value})} placeholder="http://localhost:5173/#/test/..." /></label><label>Test code<input required value={joinForm.joinCode} onChange={e=>setJoinForm({...joinForm,joinCode:e.target.value.toUpperCase()})} placeholder="e.g. 8F3A2C1D" /></label><button className="primary full" type="submit">Verify and join test →</button>{joinError && <div className="join-feedback error">{joinError}</div>}{joinMessage && <div className="join-feedback success">{joinMessage}</div>}</form><div className="info-card"><span className="label">STUDENT ACCESS</span><h2>Simple. Controlled. Traceable.</h2><div><b>01</b><span>Faculty creates and publishes the test.</span></div><div><b>02</b><span>You receive the test URL and unique code.</span></div><div><b>03</b><span>AnomalyDash verifies both before the exam session begins.</span></div></div></div></section>}
 
