@@ -25,8 +25,10 @@ app.get('/api/exams', async (_req, res) => {
 
 app.post('/api/exams', async (req, res) => {
   const { title, subject, durationMin, facultyId } = req.body;
-  if (!title || !subject || !durationMin || !facultyId) return res.status(400).json({ message: 'title, subject, durationMin and facultyId are required' });
-  const exam = await prisma.exam.create({ data: { title, subject, durationMin: Number(durationMin), facultyId } });
+  if (!title || !subject || !durationMin) return res.status(400).json({ message: 'title, subject and durationMin are required' });
+  const faculty = facultyId ? await prisma.user.findUnique({ where: { id: facultyId } }) : await prisma.user.findFirst({ where: { role: 'FACULTY' } });
+  if (!faculty) return res.status(400).json({ message: 'No faculty user exists. Run npm run db:seed first.' });
+  const exam = await prisma.exam.create({ data: { title, subject, durationMin: Number(durationMin), facultyId: faculty.id } });
   return res.status(201).json(exam);
 });
 
