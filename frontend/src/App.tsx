@@ -280,13 +280,18 @@ function App() {
       setAnomalyLevel(data.anomalyLevel ?? 'CLEAR');
       if (type === 'ONLINE' && pendingMonitoringEvents.current.length > 0) {
         const queued = pendingMonitoringEvents.current.splice(0);
-        for (const pending of queued) {
+        for (let index = 0; index < queued.length; index += 1) {
           try {
-            await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+            const pending = queued[index];
+            const queuedResponse = await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(pending)
             });
-          } catch { pendingMonitoringEvents.current.push(pending); break; }
+            if (!queuedResponse.ok) throw new Error('Could not flush queued monitoring event');
+          } catch {
+            pendingMonitoringEvents.current.push(...queued.slice(index));
+            break;
+          }
         }
       }
     } catch {
