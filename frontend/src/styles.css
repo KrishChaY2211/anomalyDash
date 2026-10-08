@@ -157,3 +157,5 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
 .monitor-level { font:9px 'DM Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
 .monitor-clear { color:#63e6be; }.monitor-low { color:#63e6be; }.monitor-medium { color:#f2c86b; }.monitor-high { color:#ff7f87; }
 @media(max-width:700px){.exam-monitor{justify-items:start}.exam-timer{min-width:110px}}
+
+.monitor-fullscreen{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:#aab3c5;border-radius:6px;padding:5px 8px;font:8px 'DM Mono',monospace;letter-spacing:.04em;cursor:pointer}.monitor-fullscreen:hover{background:rgba(255,255,255,.07);color:#fff}.monitoring-breakdown{grid-column:1/-1;border-top:1px solid rgba(255,255,255,.06);padding-top:9px;display:grid;gap:4px}.monitoring-breakdown span{font-size:9px;color:#6f7890}.monitoring-breakdown b{font:9px 'DM Mono',monospace;color:#aeb7c9;letter-spacing:.02em}@media(max-width:900px){.monitoring-breakdown{grid-column:auto}}
