@@ -71,6 +71,13 @@ enum AttemptStatus {
   EXPIRED
 }
 
+enum AnomalyLevel {
+  CLEAR
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model ExamAttempt {
   id          String        @id @default(cuid())
   examId      String
@@ -80,6 +87,8 @@ model ExamAttempt {
   submittedAt DateTime?
   status      AttemptStatus @default(IN_PROGRESS)
   score       Int?
+  anomalyScore Int @default(0)
+  anomalyLevel AnomalyLevel @default(CLEAR)
   exam        Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
   student     User          @relation(fields: [studentId], references: [id])
   answers     AttemptAnswer[]
