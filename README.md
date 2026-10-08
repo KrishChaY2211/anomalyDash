@@ -394,3 +394,52 @@ Building **AnomalyDash** as a 24-hour hackathon project.
 ## License
 
 License to be decided.
+
+
+## Phase 1 — Foundation
+
+**Status: Complete · v0.1.0**
+
+The first implementation foundation is now in place:
+
+- React + TypeScript + Vite frontend
+- Node.js + Express + TypeScript backend
+- Professional AnomalyDash product shell
+- Responsive visual system and branded interface
+- Faculty and student portal entry previews
+- Live-exam monitoring preview
+- Backend health API at `GET /api/health`
+- Environment configuration baseline
+- Phase 1 architecture documentation
+
+### Run locally
+
+```bash
+# Frontend
+cd frontend
+npm install
+npm run dev
+
+# Backend (in another terminal)
+cd backend
+npm install
+npm run dev
+```
+
+Frontend: `http://localhost:5173`  
+Backend: `http://localhost:4000`
+
+See [docs/PHASE-1.md](docs/PHASE-1.md) for the foundation definition of done.
+
+### Technology baseline
+
+| Layer | Technology |
+|---|---|
+| Frontend | React + TypeScript + Vite |
+| Backend | Node.js + Express + TypeScript |
+| API | REST foundation |
+| Future real-time layer | To be selected during system design |
+| Database | To be introduced with the application data model |
+| Anomaly engine | To be introduced after event/feature design |
+
+The implementation will keep the interface language established in Phase 1 as the product grows into the student exam and faculty monitoring workflows.
