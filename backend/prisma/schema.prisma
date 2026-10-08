@@ -39,6 +39,8 @@ model Exam {
   title       String
   subject     String
   durationMin Int
+  joinCode    String?     @unique
+  accessUrl   String?
   status      ExamStatus  @default(DRAFT)
   facultyId   String
   faculty     User        @relation("FacultyExams", fields: [facultyId], references: [id])
