@@ -83,6 +83,69 @@ app.get('/api/exams', async (req, res) => {
   res.json(exams);
 });
 
+app.post('/api/exams/:id/start', async (req, res) => {
+  try {
+    const { studentId, joinCode } = req.body;
+    if (!studentId || !joinCode) return res.status(400).json({ message: 'studentId and joinCode are required' });
+    const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { questions: { orderBy: { createdAt: 'asc' } } } });
+    if (!exam || exam.joinCode !== String(joinCode).trim().toUpperCase()) return res.status(404).json({ message: 'Invalid test or code' });
+    if (exam.status !== 'LIVE') return res.status(409).json({ message: 'This test is not live yet' });
+    const student = await prisma.user.findUnique({ where: { id: String(studentId) } });
+    if (!student || student.role !== 'STUDENT') return res.status(403).json({ message: 'Valid student account required' });
+    const existing = await prisma.examAttempt.findUnique({ where: { examId_studentId: { examId: exam.id, studentId: student.id } }, include: { answers: true } });
+    if (existing && existing.status === 'IN_PROGRESS' && existing.expiresAt > new Date()) {
+      return res.json({ attempt: existing, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+    }
+    if (existing && existing.status === 'IN_PROGRESS') await prisma.examAttempt.update({ where: { id: existing.id }, data: { status: 'EXPIRED' } });
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt.getTime() + exam.durationMin * 60 * 1000);
+    const attempt = await prisma.examAttempt.create({ data: { examId: exam.id, studentId: student.id, startedAt, expiresAt } });
+    return res.status(201).json({ attempt, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+  } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not start exam' }); }
+});
+
+app.get('/api/attempts/:id', async (req, res) => {
+  const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { include: { questions: { orderBy: { createdAt: 'asc' } } } }, answers: true } });
+  if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+  const questions = attempt.exam.questions.map(({ answerKey, ...q }) => q);
+  return res.json({ attempt, exam: { ...attempt.exam, questions } });
+});
+
+app.put('/api/attempts/:id/answers', async (req, res) => {
+  try {
+    const { questionId, answer } = req.body;
+    const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id } });
+    if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is no longer active' });
+    if (attempt.expiresAt <= new Date()) {
+      await prisma.examAttempt.update({ where: { id: attempt.id }, data: { status: 'EXPIRED' } });
+      return res.status(409).json({ message: 'Exam time has expired' });
+    }
+    const question = await prisma.question.findFirst({ where: { id: String(questionId), examId: attempt.examId } });
+    if (!question) return res.status(404).json({ message: 'Question does not belong to this exam' });
+    const saved = await prisma.attemptAnswer.upsert({
+      where: { attemptId_questionId: { attemptId: attempt.id, questionId: question.id } },
+      update: { answer: String(answer ?? '') },
+      create: { attemptId: attempt.id, questionId: question.id, answer: String(answer ?? '') }
+    });
+    return res.json(saved);
+  } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not save answer' }); }
+});
+
+app.post('/api/attempts/:id/submit', async (req, res) => {
+  try {
+    const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { answers: true, exam: { include: { questions: true } } } });
+    if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is already closed' });
+    const now = new Date();
+    const expired = attempt.expiresAt <= now;
+    const answerMap = new Map(attempt.answers.map(a => [a.questionId, a.answer.trim().toLowerCase()]));
+    const score = attempt.exam.questions.reduce((total, q) => total + (q.type === 'MCQ' && q.answerKey && answerMap.get(q.id) === q.answerKey.trim().toLowerCase() ? q.marks : 0), 0);
+    const updated = await prisma.examAttempt.update({ where: { id: attempt.id }, data: { status: expired ? 'EXPIRED' : 'SUBMITTED', submittedAt: now, score } });
+    return res.json({ attempt: updated, score });
+  } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not submit exam' }); }
+});
+
 app.get('/api/exams/:id', async (req, res) => {
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
