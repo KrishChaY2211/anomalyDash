@@ -62,7 +62,7 @@ app.post('/api/auth/signin', async (req, res) => {
     if (!user || user.role !== role || (role === 'STUDENT' && user.rollNumber !== normalizedRoll) || !verifyPassword(String(password ?? ''), user.passwordHash)) {
       return res.status(401).json({ message: 'Invalid email, password, or role' });
     }
-    return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role, rollNumber: user.rollNumber } });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not sign in' });
@@ -77,8 +77,9 @@ app.get('/api/db/health', async (_req, res) => {
   } catch (error) { console.error(error); res.status(503).json({ status: 'disconnected', database: 'sqlite' }); }
 });
 
-app.get('/api/exams', async (_req, res) => {
-  const exams = await prisma.exam.findMany({ include: { faculty: true, _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
+app.get('/api/exams', async (req, res) => {
+  const facultyId = typeof req.query.facultyId === 'string' ? req.query.facultyId : undefined;
+  const exams = await prisma.exam.findMany({ where: facultyId ? { facultyId } : undefined({ include: { faculty: true, _count: { select: { questions: true } } }, orderBy: { createdAt: 'desc' } });
   res.json(exams);
 });
 
