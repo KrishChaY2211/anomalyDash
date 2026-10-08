@@ -61,6 +61,8 @@ function App() {
   const [anomalyScore, setAnomalyScore] = useState(0);
   const [anomalyLevel, setAnomalyLevel] = useState('CLEAR');
   const lastAnswerAt = useRef(0);
+  const lastInteractionAt = useRef(Date.now());
+  const fullscreenStarted = useRef(false);
   const [facultyHistory, setFacultyHistory] = useState<any[]>([]);
   const [studentHistory, setStudentHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
