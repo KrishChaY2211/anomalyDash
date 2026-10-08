@@ -242,7 +242,7 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
 /* Final cascade guards keep the light palette from inheriting legacy dark surfaces. */
 .app-shell:not(.theme-dark) { background:radial-gradient(circle at 72% 12%,rgba(93,104,255,.08),transparent 28rem),radial-gradient(circle at 15% 42%,rgba(33,196,153,.055),transparent 24rem),var(--page-bg); color:var(--text); }
 .app-shell:not(.theme-dark) .monitoring-empty { background:var(--surface); color:var(--muted); border-color:var(--line); }
-.app-shell:not(.theme-dark) .monitoring-stats>div b { color:var(--text); }
+.app-shell:not(.theme-dark) .monitoring-stats>div b:not(.anomaly-high):not(.anomaly-medium) { color:var(--text); }
 .app-shell:not(.theme-dark) .exam-row b,.app-shell:not(.theme-dark) .exam-status,.app-shell:not(.theme-dark) .connected-badge { color:var(--success); }
 .app-shell:not(.theme-dark) .monitor-level { color:var(--muted); }
 .app-shell:not(.theme-dark) .history-attempt { background:var(--surface-soft); border-color:var(--line); }
