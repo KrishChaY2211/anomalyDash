@@ -3,6 +3,7 @@ import cors from 'cors';
 import express from 'express';
 import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
+import { answerSimilarity, extractFeatures, scoreAnomaly } from './anomalyEngine.js';
 
 const app = express();
 const makeJoinCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -218,20 +219,16 @@ app.post('/api/attempts/:id/monitoring-events', async (req, res) => {
     const event = await prisma.monitoringEvent.create({
       data: { attemptId: attempt.id, type: String(type), metadata: metadata ? JSON.stringify(metadata).slice(0, 500) : null }
     });
-    const weights: Record<string, number> = { TAB_HIDDEN: 12, WINDOW_BLUR: 8, FOCUS_LOST: 8, PASTE: 10, COPY: 4, RAPID_ANSWERS: 8, LONG_IDLE: 5, FULLSCREEN_EXIT: 10, WINDOW_FOCUS: 0, FOCUS_REGAINED: 0, TAB_VISIBLE: 0, OFFLINE: 0, ONLINE: 0, ANSWER_STARTED: 0, ANSWER_CHANGED: 0, ANSWER_SUBMITTED: 0, SKIPPED_QUESTION: 0 };
-    const allEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'desc' } });
-    const baseScore = allEvents.reduce((sum, item) => sum + (weights[item.type] ?? 0), 0);
-    const eventTypes = new Set(allEvents.map(item => item.type));
-    const combinedFactors: Array<{ type: string; contribution: number }> = [];
-    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR') || eventTypes.has('FOCUS_LOST')) && eventTypes.has('PASTE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_PASTE', contribution: 8 });
-    if ((eventTypes.has('TAB_HIDDEN') || eventTypes.has('WINDOW_BLUR') || eventTypes.has('FOCUS_LOST')) && eventTypes.has('LONG_IDLE')) combinedFactors.push({ type: 'FOCUS_LOSS_WITH_LONG_IDLE', contribution: 8 });
-    if (allEvents.filter(item => ['TAB_HIDDEN', 'WINDOW_BLUR', 'FOCUS_LOST', 'FULLSCREEN_EXIT'].includes(item.type)).length >= 3) combinedFactors.push({ type: 'REPEATED_INTERRUPTION', contribution: 5 });
-    const score = Math.min(100, baseScore + combinedFactors.reduce((sum, factor) => sum + factor.contribution, 0));
-    const { lowThreshold, mediumThreshold, highThreshold } = attempt.exam;
-    const anomalyLevel = score >= highThreshold ? 'HIGH' : score >= mediumThreshold ? 'MEDIUM' : score >= lowThreshold ? 'LOW' : 'CLEAR';
-    const updatedAttempt = await prisma.examAttempt.update({ where: { id: attempt.id }, data: { anomalyScore: score, anomalyLevel } });
-    const factors = Object.entries(allEvents.reduce((counts: Record<string, number>, item) => { counts[item.type] = (counts[item.type] ?? 0) + 1; return counts; }, {})).map(([type, count]) => ({ type, count, weight: weights[type] ?? 0, contribution: (weights[type] ?? 0) * Number(count) })).concat(combinedFactors.map(factor => ({ type: factor.type, count: 1, weight: factor.contribution, contribution: factor.contribution })));
-    return res.status(201).json({ event, anomalyScore: updatedAttempt.anomalyScore, anomalyLevel: updatedAttempt.anomalyLevel, factors });
+    const allEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'asc' } });
+    const detection = scoreAnomaly(allEvents, attempt.exam);
+    const updatedAttempt = await prisma.examAttempt.update({
+      where: { id: attempt.id },
+      data: { anomalyScore: detection.score, anomalyLevel: detection.anomalyLevel }
+    });
+    return res.status(201).json({
+      event, anomalyScore: updatedAttempt.anomalyScore, anomalyLevel: updatedAttempt.anomalyLevel,
+      factors: detection.factors, method: detection.method, note: detection.note
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not record monitoring event' });
@@ -245,8 +242,9 @@ app.get('/api/attempts/:id/monitoring', async (req, res) => {
       include: { monitoringEvents: { orderBy: { createdAt: 'asc' } }, answers: true, student: { select: { name: true, rollNumber: true } }, exam: { select: { title: true, questions: { select: { id: true } } } } }
     });
     if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
-    const features = buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length);
-    return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features });
+    const features = extractFeatures(attempt.monitoringEvents, attempt.answers, attempt.exam.questions.length, attempt.startedAt);
+    const detection = scoreAnomaly(attempt.monitoringEvents, await prisma.exam.findUniqueOrThrow({ where: { id: attempt.examId }, select: { lowThreshold: true, mediumThreshold: true, highThreshold: true } }));
+    return res.json({ attemptId: attempt.id, student: attempt.student, exam: { title: attempt.exam.title }, events: attempt.monitoringEvents, features, anomaly: detection });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Could not load monitoring data' });
@@ -351,7 +349,7 @@ app.get('/api/exams/:id/monitoring', async (req, res) => {
       id: attempt.id, student: attempt.student, status: attempt.status,
       anomalyScore: attempt.anomalyScore, anomalyLevel: attempt.anomalyLevel,
       startedAt: attempt.startedAt, events: attempt.monitoringEvents.slice(0, 8),
-      features: buildMonitoringFeatures(attempt.monitoringEvents, attempt.exam.questions.length, attempt.answers.filter(answer => answer.answer.trim().length > 0).length)
+      features: extractFeatures(attempt.monitoringEvents, attempt.answers, attempt.exam.questions.length, attempt.startedAt)
     })).sort((a, b) => b.anomalyScore - a.anomalyScore || b.startedAt.getTime() - a.startedAt.getTime()));
   } catch (error) {
     console.error(error);
