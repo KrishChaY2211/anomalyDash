@@ -27,17 +27,23 @@ const verifyPassword = (password: string, stored: string) => {
 
 app.post('/api/auth/signup', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, rollNumber } = req.body;
     const normalizedEmail = String(email ?? '').trim().toLowerCase();
     if (!String(name ?? '').trim() || !normalizedEmail || !password || !['FACULTY', 'STUDENT'].includes(role)) {
       return res.status(400).json({ message: 'name, email, password and role are required' });
     }
     if (String(password).length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    const normalizedRoll = role === 'STUDENT' ? String(rollNumber ?? '').trim().toUpperCase() : null;
+    if (role === 'STUDENT' && !normalizedRoll) return res.status(400).json({ message: 'Roll number is required for students' });
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) return res.status(409).json({ message: 'An account with this email already exists' });
+    if (normalizedRoll) {
+      const existingRoll = await prisma.user.findUnique({ where: { rollNumber: normalizedRoll } });
+      if (existingRoll) return res.status(409).json({ message: 'An account with this roll number already exists' });
+    }
     const user = await prisma.user.create({
-      data: { name: String(name).trim(), email: normalizedEmail, passwordHash: hashPassword(String(password)), role },
-      select: { id: true, name: true, email: true, role: true }
+      data: { name: String(name).trim(), email: normalizedEmail, passwordHash: hashPassword(String(password)), role, rollNumber: normalizedRoll },
+      select: { id: true, name: true, email: true, role: true, rollNumber: true }
     });
     return res.status(201).json({ user });
   } catch (error) {
@@ -48,10 +54,11 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.post('/api/auth/signin', async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password, role, rollNumber } = req.body;
     const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    const normalizedRoll = role === 'STUDENT' ? String(rollNumber ?? '').trim().toUpperCase() : null;
     const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (!user || user.role !== role || !verifyPassword(String(password ?? ''), user.passwordHash)) {
+    if (!user || user.role !== role || (role === 'STUDENT' && user.rollNumber !== normalizedRoll) || !verifyPassword(String(password ?? ''), user.passwordHash)) {
       return res.status(401).json({ message: 'Invalid email, password, or role' });
     }
     return res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
