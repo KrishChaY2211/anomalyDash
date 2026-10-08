@@ -151,3 +151,9 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
 .overview-back { border:0; background:transparent; color:#7f89a0; padding:7px 0; cursor:pointer; font:10px 'DM Mono',monospace; letter-spacing:.04em; transition:.2s ease; }
 .overview-back:hover { color:#eef1f8; transform:translateX(-2px); }
 @media(max-width:560px) { .page-topbar { margin-bottom:18px; } }
+
+.exam-monitor { display:grid; gap:5px; justify-items:end; min-width:125px; }
+.exam-monitor small { color:#687487; font:8px 'DM Mono',monospace; letter-spacing:.06em; }
+.monitor-level { font:9px 'DM Mono',monospace; letter-spacing:.1em; text-transform:uppercase; }
+.monitor-clear { color:#63e6be; }.monitor-low { color:#63e6be; }.monitor-medium { color:#f2c86b; }.monitor-high { color:#ff7f87; }
+@media(max-width:700px){.exam-monitor{justify-items:start}.exam-timer{min-width:110px}}
