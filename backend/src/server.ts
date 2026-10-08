@@ -88,6 +88,32 @@ app.get('/api/exams/:id', async (req, res) => {
   return res.json(exam);
 });
 
+app.post('/api/exams/:id/questions', async (req, res) => {
+  const { type, prompt, marks, options, answerKey } = req.body;
+  if (!prompt || !marks || !['MCQ', 'DESCRIPTIVE'].includes(type)) return res.status(400).json({ message: 'type, prompt and marks are required' });
+  const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
+  if (!exam) return res.status(404).json({ message: 'Test not found' });
+  const question = await prisma.question.create({
+    data: {
+      examId: exam.id,
+      type,
+      prompt: String(prompt).trim(),
+      marks: Number(marks),
+      options: options ? String(options).trim() : null,
+      answerKey: answerKey ? String(answerKey).trim() : null
+    }
+  });
+  return res.status(201).json(question);
+});
+
+app.patch('/api/exams/:id/publish', async (req, res) => {
+  const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
+  if (!exam) return res.status(404).json({ message: 'Test not found' });
+  if (exam._count.questions === 0) return res.status(400).json({ message: 'Add at least one question before publishing' });
+  const updated = await prisma.exam.update({ where: { id: exam.id }, data: { status: 'LIVE' } });
+  return res.json(updated);
+});
+
 app.post('/api/exams/join', async (req, res) => {
   const { testUrl, joinCode } = req.body;
   const normalizedCode = String(joinCode ?? '').trim().toUpperCase();
