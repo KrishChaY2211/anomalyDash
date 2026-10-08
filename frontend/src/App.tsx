@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 
+async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = localStorage.getItem('anomalydash_token');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return window.fetch(input, { ...init, headers });
+}
+
+
 type View = 'home' | 'login' | 'faculty' | 'student' | 'exam' | 'faculty-history' | 'student-history' | 'faculty-monitoring';
 type Role = 'faculty' | 'student';
 type AuthMode = 'signin' | 'signup';
@@ -98,7 +106,7 @@ function App() {
   const loadData = async () => {
     try {
       const examsUrl = currentUser?.role === 'FACULTY' ? `/api/exams?facultyId=${encodeURIComponent(currentUser.id)}` : '/api/exams';
-      const response = await fetch(examsUrl);
+      const response = await apiFetch(examsUrl);
       if (!response.ok) throw new Error();
       const data = await response.json();
       setExams(data);
@@ -118,7 +126,7 @@ function App() {
     if (!form.title.trim() || !form.subject.trim() || !currentUser) return;
     setCreating(true);
     try {
-      const response = await fetch('/api/exams', {
+      const response = await apiFetch('/api/exams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, durationMin: Number(form.durationMin), lowThreshold: Number(form.lowThreshold), mediumThreshold: Number(form.mediumThreshold), highThreshold: Number(form.highThreshold), facultyId: currentUser.id })
@@ -138,7 +146,7 @@ function App() {
     if (!selectedExam || !questionForm.prompt.trim()) return;
     setAddingQuestion(true);
     try {
-      const response = await fetch(`/api/exams/${selectedExam.id}/questions`, {
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/questions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...questionForm, marks: Number(questionForm.marks), options: questionForm.type === 'MCQ' ? questionForm.options.split('|').map(option => option.trim()).filter(Boolean).join('|') : '', answerKey: questionForm.type === 'MCQ' ? (questionForm.options.split('|').map(option => option.trim())[['A','B','C','D'].indexOf(questionForm.answerKey)] || '') : questionForm.answerKey })
       });
@@ -158,7 +166,7 @@ function App() {
     if (!window.confirm('End this live session? Students who have not started will be blocked, and active attempts will be closed.')) return;
     setEndingExam(true);
     try {
-      const response = await fetch(`/api/exams/${selectedExam.id}/end`, {
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/end`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facultyId: currentUser.id })
@@ -180,7 +188,7 @@ function App() {
     if (exam.status !== 'COMPLETED') return;
     if (!window.confirm('Permanently remove this completed test and its records?')) return;
     try {
-      const response = await fetch('/api/exams/' + exam.id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facultyId: currentUser?.id }) });
+      const response = await apiFetch('/api/exams/' + exam.id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facultyId: currentUser?.id }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not remove test');
       setExams(prev => prev.filter(item => item.id !== exam.id));
@@ -193,7 +201,7 @@ function App() {
     if (!selectedExam) return;
     setPublishing(true);
     try {
-      const response = await fetch(`/api/exams/${selectedExam.id}/publish`, { method: 'PATCH' });
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/publish`, { method: 'PATCH' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not publish test');
       const updatedExam = { ...selectedExam, status: 'LIVE' };
@@ -208,7 +216,7 @@ function App() {
     event.preventDefault();
     setJoinError(''); setJoinMessage('');
     try {
-      const response = await fetch('/api/exams/join', {
+      const response = await apiFetch('/api/exams/join', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(joinForm)
       });
@@ -224,13 +232,15 @@ function App() {
     if (authMode === 'signup' && authForm.password !== authForm.confirmPassword) { setAuthError('Passwords do not match.'); return; }
     setAuthLoading(true);
     try {
-      const response = await fetch(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/signin', {
+      const response = await apiFetch(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/signin', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: authForm.name, rollNumber: authForm.rollNumber, email: authForm.email, password: authForm.password, role: role.toUpperCase() })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || `Authentication failed (${response.status})`);
       if (!data.user) throw new Error('Authentication succeeded but no user session was returned.');
+      if (typeof data.token !== 'string' || !data.token) throw new Error('Authentication succeeded without a valid session token.');
+      localStorage.setItem('anomalydash_token', data.token);
       localStorage.setItem('anomalydash_user', JSON.stringify(data.user));
       setCurrentUser(data.user); setAuthSuccess(authMode === 'signin' ? 'Sign in successful. Opening your dashboard…' : 'Account created successfully. Opening your dashboard…'); setAuthForm({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '' });
       navigate(role);
@@ -243,7 +253,7 @@ function App() {
     if (!currentUser || currentUser.role !== 'STUDENT') return;
     setExamLoading(true); setExamError(''); setExamMessage('');
     try {
-      const response = await fetch(`/api/exams/${examId}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: currentUser.id, joinCode }) });
+      const response = await apiFetch(`/api/exams/${examId}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: currentUser.id, joinCode }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not start exam');
       setActiveAttempt(data.attempt);
@@ -270,7 +280,7 @@ function App() {
   const recordMonitoringEvent = async (type: string, metadata?: Record<string, unknown>) => {
     if (!activeAttempt || activeAttempt.status !== 'IN_PROGRESS') return;
     try {
-      const response = await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+      const response = await apiFetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, metadata })
       });
@@ -283,7 +293,7 @@ function App() {
         for (let index = 0; index < queued.length; index += 1) {
           try {
             const pending = queued[index];
-            const queuedResponse = await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+            const queuedResponse = await apiFetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(pending)
             });
@@ -415,7 +425,7 @@ function App() {
     lastAnswerAt.current = now;
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
     try {
-      const response = await fetch(`/api/attempts/${activeAttempt.id}/answers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId, answer }) });
+      const response = await apiFetch(`/api/attempts/${activeAttempt.id}/answers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId, answer }) });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         setExamError(data.message || 'Could not save answer');
@@ -428,7 +438,7 @@ function App() {
     setExamLoading(true); setExamError('');
     try {
       await recordMonitoringEvent('ANSWER_SUBMITTED', { answeredQuestionCount: Object.values(answerValues.current).filter(value => String(value || '').trim()).length });
-      const response = await fetch(`/api/attempts/${activeAttempt.id}/submit`, { method: 'POST' });
+      const response = await apiFetch(`/api/attempts/${activeAttempt.id}/submit`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not submit exam');
       setActiveAttempt(data.attempt);
@@ -458,7 +468,7 @@ function App() {
     let cancelled = false;
     const loadMonitoring = async () => {
       try {
-        const response = await fetch('/api/exams/' + selectedExam.id + '/monitoring?facultyId=' + encodeURIComponent(currentUser?.id || ''));
+        const response = await apiFetch('/api/exams/' + selectedExam.id + '/monitoring?facultyId=' + encodeURIComponent(currentUser?.id || ''));
         if (!response.ok) return;
         const data = await response.json();
         if (!cancelled) setLiveMonitoring(data);
@@ -473,7 +483,7 @@ function App() {
     if (!currentUser || currentUser.role !== 'FACULTY') return;
     setHistoryLoading(true);
     try {
-      const response = await fetch(`/api/faculty/${currentUser.id}/history`);
+      const response = await apiFetch(`/api/faculty/${currentUser.id}/history`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not load history');
       setFacultyHistory(data);
@@ -485,7 +495,7 @@ function App() {
     if (!currentUser || currentUser.role !== 'STUDENT') return;
     setHistoryLoading(true);
     try {
-      const response = await fetch(`/api/students/${currentUser.id}/history`);
+      const response = await apiFetch(`/api/students/${currentUser.id}/history`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not load history');
       setStudentHistory(data);
@@ -493,7 +503,13 @@ function App() {
     finally { setHistoryLoading(false); }
   };
 
-  const logout = () => { localStorage.removeItem('anomalydash_user'); setCurrentUser(null); navigate('home'); };
+  const logout = () => {
+    void apiFetch('/api/auth/signout', { method: 'POST' }).catch(() => undefined);
+    localStorage.removeItem('anomalydash_token');
+    localStorage.removeItem('anomalydash_user');
+    setCurrentUser(null);
+    navigate('home');
+  };
 
   return (
     <main className={`app-shell theme-${theme}`} style={{ '--font-scale': fontScale } as CSSProperties}>
