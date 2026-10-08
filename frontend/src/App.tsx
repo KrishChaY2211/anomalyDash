@@ -25,7 +25,9 @@ const apiFetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
   const headers = new Headers(init.headers);
   const token = localStorage.getItem('anomalydash_token');
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+  const target = typeof input === 'string' && input.startsWith('/api') ? apiBase + input : input;
+  return fetch(target, { ...init, headers });
 };
 
 function getInitialView(): View {
