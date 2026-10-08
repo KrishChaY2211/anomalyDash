@@ -170,6 +170,27 @@ app.post('/api/exams/:id/questions', async (req, res) => {
   return res.status(201).json(question);
 });
 
+app.patch('/api/exams/:id/end', async (req, res) => {
+  try {
+    const { facultyId } = req.body;
+    const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
+    if (!exam) return res.status(404).json({ message: 'Test not found' });
+    if (exam.facultyId !== String(facultyId ?? '')) return res.status(403).json({ message: 'Only the test owner can end this session' });
+    if (exam.status !== 'LIVE') return res.status(409).json({ message: 'This test is not currently live' });
+
+    const now = new Date();
+    await prisma.examAttempt.updateMany({
+      where: { examId: exam.id, status: 'IN_PROGRESS' },
+      data: { status: 'SUBMITTED', submittedAt: now }
+    });
+    const updated = await prisma.exam.update({ where: { id: exam.id }, data: { status: 'COMPLETED' } });
+    return res.json(updated);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not end live session' });
+  }
+});
+
 app.patch('/api/exams/:id/publish', async (req, res) => {
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, include: { _count: { select: { questions: true } } } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
