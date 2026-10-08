@@ -27,7 +27,7 @@ function App() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ title: '', subject: '', durationMin: '60' });
-  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [authForm, setAuthForm] = useState({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '' });
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -108,12 +108,12 @@ function App() {
       const response = await fetch(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/signin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: authForm.name, email: authForm.email, password: authForm.password, role: role.toUpperCase() }),
+        body: JSON.stringify({ name: authForm.name, rollNumber: authForm.rollNumber, email: authForm.email, password: authForm.password, role: role.toUpperCase() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Authentication failed');
       localStorage.setItem('anomalydash_user', JSON.stringify(data.user));
-      setAuthForm({ name: '', email: '', password: '', confirmPassword: '' });
+      setAuthForm({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '' });
       navigate(role);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Authentication failed');
@@ -195,6 +195,7 @@ function App() {
               {authMode === 'signup' && (
                 <label>Full name<input type="text" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} placeholder="Enter your full name" /></label>
               )}
+              {role === 'student' && <label>Roll number<input type="text" required value={authForm.rollNumber} onChange={e => setAuthForm({...authForm, rollNumber: e.target.value})} placeholder="Enter your college roll number" /></label>}
               <label>Email address<input type="email" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label>
               <label>Password<input type="password" required minLength={6} value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} placeholder="Enter your password" /></label>
               {authMode === 'signup' && (
