@@ -33,6 +33,7 @@ model User {
   createdAt DateTime @default(now())
   exams     Exam[]   @relation("FacultyExams")
   attempts  ExamAttempt[]
+  questionBank QuestionBankItem[]
 }
 
 model Exam {
@@ -67,6 +68,22 @@ model Question {
   attemptAnswers AttemptAnswer[]
 }
 
+
+model QuestionBankItem {
+  id        String       @id @default(cuid())
+  facultyId String
+  faculty   User         @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  subject   String
+  topic     String?
+  type      QuestionType
+  prompt    String
+  marks     Int
+  options   String?
+  answerKey String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  @@index([facultyId, subject])
+}
 
 enum AttemptStatus {
   IN_PROGRESS
