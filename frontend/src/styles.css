@@ -375,3 +375,60 @@ footer { display:flex;justify-content:space-between;padding:22px 0 30px;color:#4
   .app-shell .exam-progress-track { grid-column: 1 / -1; grid-row: 2; }
   .app-shell .exam-question-nav > span { order: 3; flex-basis: 100%; }
 }
+
+/* Faculty test builder: visible, editable question list */
+.app-shell .exam-question-list {
+  margin-top: 24px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.app-shell .exam-question-list > .data-card-heading {
+  margin-bottom: 16px;
+}
+.app-shell .exam-question-list h3 {
+  margin: 4px 0 0;
+  font-size: 18px;
+}
+.app-shell .exam-question-item {
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+.app-shell .question-item-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.app-shell .question-item-heading strong {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.app-shell .question-item-heading > span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.app-shell .question-preview-options {
+  margin: 12px 0 0;
+  padding-left: 24px;
+  color: var(--muted);
+  display: grid;
+  gap: 5px;
+  font-size: 13px;
+}
+.app-shell .question-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.app-shell .question-edit-form {
+  margin-top: 4px;
+}
+@media (max-width: 560px) {
+  .app-shell .exam-question-list { padding: 16px; }
+  .app-shell .question-item-heading { flex-direction: column; gap: 4px; }
+}
