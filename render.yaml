@@ -14,7 +14,7 @@ services:
     repo: https://github.com/KrishChaY2211/anomalyDash
     branch: security/deployment-readiness
     autoDeploy: true
-    buildCommand: cd backend && npm install && npx prisma generate --schema=prisma/schema.production.prisma && npm run build
+    buildCommand: cd backend && npm install --include=dev && npx prisma generate --schema=prisma/schema.production.prisma && npm run build
     startCommand: cd backend && npx prisma db push --schema=prisma/schema.production.prisma && npm start
     healthCheckPath: /api/health
     envVars:
