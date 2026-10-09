@@ -198,6 +198,7 @@ app.get('/api/faculty/:facultyId/history', async (req, res) => {
       where: { facultyId: req.params.facultyId, status: 'COMPLETED' },
       include: {
         _count: { select: { questions: true } },
+        questions: { select: { marks: true } },
         attempts: { include: { student: { select: { id: true, name: true, email: true, rollNumber: true } } }, orderBy: { startedAt: 'desc' } }
       },
       orderBy: { updatedAt: 'desc' }
@@ -247,7 +248,7 @@ app.post('/api/exams/:id/start', async (req, res) => {
     if (existing) {
       if (existing.status === 'IN_PROGRESS' && existing.expiresAt > new Date()) {
         const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = existing;
-        return res.json({ attempt: studentAttempt, exam: { ...exam, questions: exam.questions.map(({ answerKey, ...q }) => q) } });
+        return res.json({ attempt: studentAttempt, exam: { ...exam, questions: exam.questions.map(({ answerKey, answerKeywords, ...q }) => q) } });
       }
       if (existing.status === 'IN_PROGRESS') {
         await prisma.examAttempt.update({ where: { id: existing.id }, data: { status: 'EXPIRED' } });
@@ -268,7 +269,7 @@ app.get('/api/attempts/:id', async (req, res) => {
   const auth = authOf(req)!;
   if (auth.role === 'STUDENT' && attempt.studentId !== auth.userId) return res.status(403).json({ message: 'You can only view your own attempt' });
   if (auth.role === 'FACULTY' && attempt.exam.facultyId !== auth.userId) return res.status(403).json({ message: 'You can only view attempts for your own exams' });
-  const questions = attempt.exam.questions.map(({ answerKey, ...q }) => q);
+  const questions = attempt.exam.questions.map(({ answerKey, answerKeywords, ...q }) => q);
   const { anomalyScore: _score, anomalyLevel: _level, ...studentAttempt } = attempt;
   return res.json({ attempt: studentAttempt, exam: { ...attempt.exam, questions } });
 });
@@ -404,7 +405,7 @@ app.post('/api/attempts/:id/submit', async (req, res) => {
     const answerMap = new Map(attempt.answers.map(a => [a.questionId, a.answer.trim()]));
     const monitoringEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'asc' } });
     const detection = scoreAnomaly(monitoringEvents, attempt.exam);
-    const needsReview = detection.score >= attempt.exam.mediumThreshold;
+    const needsReview = detection.score >= attempt.exam.highThreshold;
     const score = needsReview ? null : attempt.exam.questions.reduce((total, q) => {
       const answer = (answerMap.get(q.id) ?? '').trim();
       if (!answer) return total;
