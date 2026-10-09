@@ -1,7 +1,7 @@
 databases:
   - name: anomalydash-db
-    databaseName: anomalydash
-    user: anomalydash
+    databaseName: anomalydash_db
+    user: anomalydash_db_user
     plan: free
     region: singapore
 
