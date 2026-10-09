@@ -93,25 +93,31 @@ export function scoreAnomaly(events: EventRecord[], thresholds: Thresholds) {
   const factors: Array<{ type: string; count: number; weight: number; contribution: number; explanation: string }> = [];
   for (const [type, count] of Object.entries(counts)) {
     const weight = weights[type] ?? 0;
-    if (weight > 0 && count > 0) factors.push({
-      type, count, weight, contribution: Math.min(weight * count, type === 'TAB_HIDDEN' ? 32 : 24),
-      explanation: type === 'TAB_HIDDEN' ? 'Examination tab became hidden' :
-        type === 'PASTE' ? 'Paste event detected in the examination page' :
-        type === 'FULLSCREEN_EXIT' ? 'Fullscreen mode was exited' :
-        type === 'RAPID_ANSWERS' ? 'Rapid-answer pattern was reported' :
-        type === 'LONG_IDLE' ? 'Long idle period was reported' :
-        type === 'COPY' ? 'Copy event was reported' : 'Browser or window focus was lost'
-    });
+    if (weight > 0 && count > 0) {
+      // Repeated events have diminishing impact. A burst of browser blur/visibility
+      // notifications must not be treated as many independent suspicious actions.
+      const diminishingContribution = weight * (1 + Math.min(Math.max(0, count - 1), 5) * 0.25);
+      const cap = type === 'TAB_HIDDEN' ? 12 : type === 'WINDOW_BLUR' || type === 'FOCUS_LOST' ? 8 : 10;
+      factors.push({
+        type, count, weight, contribution: Math.min(cap, Math.round(diminishingContribution)),
+        explanation: type === 'TAB_HIDDEN' ? 'Examination tab became hidden' :
+          type === 'PASTE' ? 'Paste event detected in the examination page' :
+          type === 'FULLSCREEN_EXIT' ? 'Fullscreen mode was exited' :
+          type === 'RAPID_ANSWERS' ? 'Rapid-answer pattern was reported' :
+          type === 'LONG_IDLE' ? 'Long idle period was reported' :
+          type === 'COPY' ? 'Copy event was reported' : 'Browser or window focus was lost'
+      });
+    }
   }
 
   const hasFocusLoss = (counts.TAB_HIDDEN ?? 0) + (counts.WINDOW_BLUR ?? 0) + (counts.FOCUS_LOST ?? 0) > 0;
   const addCombined = (type: string, contribution: number, explanation: string) => {
     factors.push({ type, count: 1, weight: contribution, contribution, explanation });
   };
-  if (hasFocusLoss && (counts.PASTE ?? 0) > 0) addCombined('FOCUS_LOSS_WITH_PASTE', 10, 'Focus loss and paste activity occurred in the same attempt');
-  if (hasFocusLoss && (counts.LONG_IDLE ?? 0) > 0) addCombined('FOCUS_LOSS_WITH_IDLE', 6, 'Focus loss coincided with a reported long idle period');
+  if (hasFocusLoss && (counts.PASTE ?? 0) > 0) addCombined('FOCUS_LOSS_WITH_PASTE', 5, 'Focus loss and paste activity occurred in the same attempt');
+  if (hasFocusLoss && (counts.LONG_IDLE ?? 0) > 0) addCombined('FOCUS_LOSS_WITH_IDLE', 3, 'Focus loss coincided with a reported long idle period');
   if ((counts.TAB_HIDDEN ?? 0) + (counts.WINDOW_BLUR ?? 0) + (counts.FOCUS_LOST ?? 0) + (counts.FULLSCREEN_EXIT ?? 0) >= 3) {
-    addCombined('REPEATED_INTERRUPTION', 6, 'Several focus or fullscreen interruptions were recorded');
+    addCombined('REPEATED_INTERRUPTION', 3, 'Several focus or fullscreen interruptions were recorded');
   }
 
   const rawScore = factors.reduce((sum, factor) => sum + factor.contribution, 0);
