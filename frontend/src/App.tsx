@@ -145,6 +145,8 @@ function App() {
       if (!response.ok) throw new Error(data.message || 'Could not create test');
       setForm({ title: '', subject: '', durationMin: '60', lowThreshold: '10', mediumThreshold: '30', highThreshold: '60' });
       setSelectedExam(data);
+      setExamQuestions([]);
+      setEditingQuestionId(null);
       setExams(prev => [data, ...prev.filter(exam => exam.id !== data.id)]);
       void loadData();
     } catch (error) { setDbStatus('offline'); alert(error instanceof Error ? error.message : 'Could not create test'); }
