@@ -27,7 +27,7 @@ test('scoreAnomaly combines event weights and labels using configured thresholds
     { type: 'PASTE', metadata: null, createdAt: new Date() }
   ], { lowThreshold: 10, mediumThreshold: 30, highThreshold: 60 });
 
-  assert.equal(result.score, 26);
+  assert.equal(result.score, 21);
   assert.equal(result.anomalyLevel, 'LOW');
   assert.ok(result.factors.some(factor => factor.type === 'FOCUS_LOSS_WITH_PASTE'));
   assert.match(result.note, /not proof of misconduct/);
@@ -37,4 +37,16 @@ test('answerSimilarity uses token overlap and handles empty answers', () => {
   assert.equal(answerSimilarity('The quick brown fox', 'the quick brown fox'), 100);
   assert.equal(answerSimilarity('', 'any text'), 0);
   assert.equal(answerSimilarity('alpha beta', 'gamma delta'), 0);
+});
+
+
+test('repeated tab switches have diminishing impact and cannot instantly max the score alone', () => {
+  const events = Array.from({ length: 3 }, (_, index) => ({
+    type: 'TAB_HIDDEN',
+    metadata: null,
+    createdAt: new Date(Date.now() + index * 1000)
+  }));
+  const result = scoreAnomaly(events, { lowThreshold: 10, mediumThreshold: 30, highThreshold: 60 });
+  assert.ok(result.score < 60, `expected score below high threshold, got ${result.score}`);
+  assert.ok(result.score < 100, `expected score below 100, got ${result.score}`);
 });
