@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, security/deployment-readiness]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/anomalydash?schema=public
+      SESSION_SECRET: ci-test-session-secret-that-is-long-enough-123456
+      FACULTY_SIGNUP_CODE: ci-only-faculty-code
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx prisma validate --schema=prisma/schema.production.prisma
+      - run: npx prisma generate --schema=prisma/schema.production.prisma
+      - run: npm run build
+      - run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run build
+        env:
+          VITE_API_URL: https://anomalydash-api.onrender.com

@@ -21,6 +21,15 @@ type Exam = {
 };
 type Question = { id: string; type: string; prompt: string; marks: number; options?: string | null; answerKey?: string | null };
 
+const apiFetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
+  const headers = new Headers(init.headers);
+  const token = localStorage.getItem('anomalydash_token');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+  const target = typeof input === 'string' && input.startsWith('/api') ? apiBase + input : input;
+  return fetch(target, { ...init, headers });
+};
+
 function getInitialView(): View {
   const hash = window.location.hash.replace('#/', '');
   if (hash === 'faculty') return 'faculty';
@@ -43,7 +52,7 @@ function App() {
   const [dbStatus, setDbStatus] = useState('checking');
   const [exams, setExams] = useState<Exam[]>([]);
   const [form, setForm] = useState({ title: '', subject: '', durationMin: '60', lowThreshold: '30', mediumThreshold: '60', highThreshold: '80' });
-  const [authForm, setAuthForm] = useState({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '' });
+  const [authForm, setAuthForm] = useState({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '', facultySignupCode: '' });
   const [authError, setAuthError] = useState('');
   const [authSuccess, setAuthSuccess] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -54,11 +63,16 @@ function App() {
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [questionForm, setQuestionForm] = useState({ type: 'MCQ', prompt: '', marks: '1', options: '|||', answerKey: 'A' });
   const [addingQuestion, setAddingQuestion] = useState(false);
+  const [examQuestions, setExamQuestions] = useState<Question[]>([]);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [editQuestionForm, setEditQuestionForm] = useState({ type: 'MCQ', prompt: '', marks: '1', options: '|||', answerKey: 'A' });
+  const [savingQuestionEdit, setSavingQuestionEdit] = useState(false);
   const [joinForm, setJoinForm] = useState({ testUrl: '', joinCode: '' });
   const [joinMessage, setJoinMessage] = useState('');
   const [joinError, setJoinError] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [endingExam, setEndingExam] = useState(false);
+  const [confirmEndingExam, setConfirmEndingExam] = useState(false);
   const [activeAttempt, setActiveAttempt] = useState<any | null>(null);
   const [activeExam, setActiveExam] = useState<any | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -98,7 +112,7 @@ function App() {
   const loadData = async () => {
     try {
       const examsUrl = currentUser?.role === 'FACULTY' ? `/api/exams?facultyId=${encodeURIComponent(currentUser.id)}` : '/api/exams';
-      const response = await fetch(examsUrl);
+      const response = await apiFetch(examsUrl);
       if (!response.ok) throw new Error();
       const data = await response.json();
       setExams(data);
@@ -118,7 +132,7 @@ function App() {
     if (!form.title.trim() || !form.subject.trim() || !currentUser) return;
     setCreating(true);
     try {
-      const response = await fetch('/api/exams', {
+      const response = await apiFetch('/api/exams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, durationMin: Number(form.durationMin), lowThreshold: Number(form.lowThreshold), mediumThreshold: Number(form.mediumThreshold), highThreshold: Number(form.highThreshold), facultyId: currentUser.id })
@@ -127,10 +141,76 @@ function App() {
       if (!response.ok) throw new Error(data.message || 'Could not create test');
       setForm({ title: '', subject: '', durationMin: '60', lowThreshold: '10', mediumThreshold: '30', highThreshold: '60' });
       setSelectedExam(data);
+      setExamQuestions([]);
+      setEditingQuestionId(null);
       setExams(prev => [data, ...prev.filter(exam => exam.id !== data.id)]);
       void loadData();
     } catch (error) { setDbStatus('offline'); alert(error instanceof Error ? error.message : 'Could not create test'); }
     finally { setCreating(false); }
+  };
+
+  const loadExamQuestions = async (exam: Exam) => {
+    setExamQuestions([]);
+    setEditingQuestionId(null);
+    try {
+      const response = await apiFetch(`/api/exams/${exam.id}/questions`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not load questions');
+      setExamQuestions(data);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not load questions');
+    }
+  };
+
+  const beginEditQuestion = (question: Question) => {
+    const options = (question.options || '').split('|');
+    const answerIndex = options.findIndex(option => option === question.answerKey);
+    setEditingQuestionId(question.id);
+    setEditQuestionForm({
+      type: question.type,
+      prompt: question.prompt,
+      marks: String(question.marks),
+      options: question.options || '|||',
+      answerKey: ['A', 'B', 'C', 'D'][Math.max(0, answerIndex)] || 'A'
+    });
+  };
+
+  const saveQuestionEdit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedExam || !editingQuestionId || !editQuestionForm.prompt.trim()) return;
+    setSavingQuestionEdit(true);
+    try {
+      const options = editQuestionForm.options.split('|').map(option => option.trim()).filter(Boolean);
+      const answerKey = editQuestionForm.type === 'MCQ'
+        ? (options[['A', 'B', 'C', 'D'].indexOf(editQuestionForm.answerKey)] || '')
+        : '';
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/questions/${editingQuestionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: editQuestionForm.type,
+          prompt: editQuestionForm.prompt.trim(),
+          marks: Number(editQuestionForm.marks),
+          options: editQuestionForm.type === 'MCQ' ? options.join('|') : '',
+          answerKey
+        })
+      });
+      const responseText = await response.text();
+      let data: any = {};
+      try { data = responseText ? JSON.parse(responseText) : {}; } catch {
+        const hint = responseText.trim().startsWith('<')
+          ? 'The API returned an HTML page instead of JSON. The backend deployment or API URL may be incorrect.'
+          : 'The API returned an invalid response while saving the question.';
+        throw new Error(`${hint} (HTTP ${response.status})`);
+      }
+      if (!response.ok) throw new Error(data.message || `Could not update question (HTTP ${response.status})`);
+      setExamQuestions(previous => previous.map(question => question.id === data.id ? data : question));
+      setEditingQuestionId(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not update question');
+    } finally {
+      setSavingQuestionEdit(false);
+    }
   };
 
   const addQuestion = async (event: FormEvent) => {
@@ -138,13 +218,14 @@ function App() {
     if (!selectedExam || !questionForm.prompt.trim()) return;
     setAddingQuestion(true);
     try {
-      const response = await fetch(`/api/exams/${selectedExam.id}/questions`, {
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/questions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...questionForm, marks: Number(questionForm.marks), options: questionForm.type === 'MCQ' ? questionForm.options.split('|').map(option => option.trim()).filter(Boolean).join('|') : '', answerKey: questionForm.type === 'MCQ' ? (questionForm.options.split('|').map(option => option.trim())[['A','B','C','D'].indexOf(questionForm.answerKey)] || '') : questionForm.answerKey })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not add question');
       setQuestionForm({ type: 'MCQ', prompt: '', marks: '1', options: '|||', answerKey: 'A' });
+      setExamQuestions(previous => [...previous, data]);
       const updatedExam = { ...selectedExam, _count: { questions: (selectedExam._count?.questions || 0) + 1 } };
       setSelectedExam(updatedExam);
       setExams(prev => prev.map(exam => exam.id === selectedExam.id ? updatedExam : exam));
@@ -154,20 +235,27 @@ function App() {
   };
 
   const endLiveSession = async () => {
-    if (!selectedExam || selectedExam.status !== 'LIVE' || !currentUser) return;
-    if (!window.confirm('End this live session? Students who have not started will be blocked, and active attempts will be closed.')) return;
+    if (!selectedExam || selectedExam.status !== 'LIVE' || !currentUser || endingExam) return;
+    if (!confirmEndingExam) {
+      setConfirmEndingExam(true);
+      return;
+    }
     setEndingExam(true);
     try {
-      const response = await fetch(`/api/exams/${selectedExam.id}/end`, {
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/end`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facultyId: currentUser.id })
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Could not end live session');
+      const responseText = await response.text();
+      let data: { message?: string; status?: string } = {};
+      try { data = responseText ? JSON.parse(responseText) : {}; } catch { /* handled below */ }
+      if (!response.ok) throw new Error(data.message || `Could not end live session (HTTP ${response.status})`);
+      if (data.status && data.status !== 'COMPLETED') throw new Error('The server did not confirm that the session was completed. Please refresh and try again.');
       const updatedExam = { ...selectedExam, status: 'COMPLETED' };
       setSelectedExam(updatedExam);
       setExams(prev => prev.map(exam => exam.id === selectedExam.id ? updatedExam : exam));
+      setConfirmEndingExam(false);
       void loadData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Could not end live session');
@@ -180,7 +268,7 @@ function App() {
     if (exam.status !== 'COMPLETED') return;
     if (!window.confirm('Permanently remove this completed test and its records?')) return;
     try {
-      const response = await fetch('/api/exams/' + exam.id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facultyId: currentUser?.id }) });
+      const response = await apiFetch('/api/exams/' + exam.id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ facultyId: currentUser?.id }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not remove test');
       setExams(prev => prev.filter(item => item.id !== exam.id));
@@ -193,7 +281,7 @@ function App() {
     if (!selectedExam) return;
     setPublishing(true);
     try {
-      const response = await fetch(`/api/exams/${selectedExam.id}/publish`, { method: 'PATCH' });
+      const response = await apiFetch(`/api/exams/${selectedExam.id}/publish`, { method: 'PATCH' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not publish test');
       const updatedExam = { ...selectedExam, status: 'LIVE' };
@@ -208,7 +296,7 @@ function App() {
     event.preventDefault();
     setJoinError(''); setJoinMessage('');
     try {
-      const response = await fetch('/api/exams/join', {
+      const response = await apiFetch('/api/exams/join', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(joinForm)
       });
@@ -224,15 +312,17 @@ function App() {
     if (authMode === 'signup' && authForm.password !== authForm.confirmPassword) { setAuthError('Passwords do not match.'); return; }
     setAuthLoading(true);
     try {
-      const response = await fetch(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/signin', {
+      const response = await apiFetch(authMode === 'signup' ? '/api/auth/signup' : '/api/auth/signin', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: authForm.name, rollNumber: authForm.rollNumber, email: authForm.email, password: authForm.password, role: role.toUpperCase() })
+        body: JSON.stringify({ name: authForm.name, rollNumber: authForm.rollNumber, email: authForm.email, password: authForm.password, role: role.toUpperCase(), facultySignupCode: authForm.facultySignupCode })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || `Authentication failed (${response.status})`);
       if (!data.user) throw new Error('Authentication succeeded but no user session was returned.');
+      if (!data.token) throw new Error('No secure session was returned by the server.');
+      localStorage.setItem('anomalydash_token', data.token);
       localStorage.setItem('anomalydash_user', JSON.stringify(data.user));
-      setCurrentUser(data.user); setAuthSuccess(authMode === 'signin' ? 'Sign in successful. Opening your dashboard…' : 'Account created successfully. Opening your dashboard…'); setAuthForm({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '' });
+      setCurrentUser(data.user); setAuthSuccess(authMode === 'signin' ? 'Sign in successful. Opening your dashboard…' : 'Account created successfully. Opening your dashboard…'); setAuthForm({ name: '', rollNumber: '', email: '', password: '', confirmPassword: '', facultySignupCode: '' });
       navigate(role);
     } catch (error) { const message = error instanceof Error ? error.message : 'Authentication failed'; setAuthError(message); console.error('AnomalyDash authentication error:', error); }
     finally { setAuthLoading(false); }
@@ -243,7 +333,7 @@ function App() {
     if (!currentUser || currentUser.role !== 'STUDENT') return;
     setExamLoading(true); setExamError(''); setExamMessage('');
     try {
-      const response = await fetch(`/api/exams/${examId}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: currentUser.id, joinCode }) });
+      const response = await apiFetch(`/api/exams/${examId}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ studentId: currentUser.id, joinCode }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not start exam');
       setActiveAttempt(data.attempt);
@@ -270,7 +360,7 @@ function App() {
   const recordMonitoringEvent = async (type: string, metadata?: Record<string, unknown>) => {
     if (!activeAttempt || activeAttempt.status !== 'IN_PROGRESS') return;
     try {
-      const response = await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+      const response = await apiFetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, metadata })
       });
@@ -283,7 +373,7 @@ function App() {
         for (let index = 0; index < queued.length; index += 1) {
           try {
             const pending = queued[index];
-            const queuedResponse = await fetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
+            const queuedResponse = await apiFetch('/api/attempts/' + activeAttempt.id + '/monitoring-events', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(pending)
             });
@@ -415,7 +505,7 @@ function App() {
     lastAnswerAt.current = now;
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
     try {
-      const response = await fetch(`/api/attempts/${activeAttempt.id}/answers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId, answer }) });
+      const response = await apiFetch(`/api/attempts/${activeAttempt.id}/answers`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId, answer }) });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         setExamError(data.message || 'Could not save answer');
@@ -428,7 +518,7 @@ function App() {
     setExamLoading(true); setExamError('');
     try {
       await recordMonitoringEvent('ANSWER_SUBMITTED', { answeredQuestionCount: Object.values(answerValues.current).filter(value => String(value || '').trim()).length });
-      const response = await fetch(`/api/attempts/${activeAttempt.id}/submit`, { method: 'POST' });
+      const response = await apiFetch(`/api/attempts/${activeAttempt.id}/submit`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not submit exam');
       setActiveAttempt(data.attempt);
@@ -458,7 +548,7 @@ function App() {
     let cancelled = false;
     const loadMonitoring = async () => {
       try {
-        const response = await fetch('/api/exams/' + selectedExam.id + '/monitoring?facultyId=' + encodeURIComponent(currentUser?.id || ''));
+        const response = await apiFetch('/api/exams/' + selectedExam.id + '/monitoring?facultyId=' + encodeURIComponent(currentUser?.id || ''));
         if (!response.ok) return;
         const data = await response.json();
         if (!cancelled) setLiveMonitoring(data);
@@ -473,7 +563,7 @@ function App() {
     if (!currentUser || currentUser.role !== 'FACULTY') return;
     setHistoryLoading(true);
     try {
-      const response = await fetch(`/api/faculty/${currentUser.id}/history`);
+      const response = await apiFetch(`/api/faculty/${currentUser.id}/history`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not load history');
       setFacultyHistory(data);
@@ -485,7 +575,7 @@ function App() {
     if (!currentUser || currentUser.role !== 'STUDENT') return;
     setHistoryLoading(true);
     try {
-      const response = await fetch(`/api/students/${currentUser.id}/history`);
+      const response = await apiFetch(`/api/students/${currentUser.id}/history`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Could not load history');
       setStudentHistory(data);
@@ -493,7 +583,7 @@ function App() {
     finally { setHistoryLoading(false); }
   };
 
-  const logout = () => { localStorage.removeItem('anomalydash_user'); setCurrentUser(null); navigate('home'); };
+  const logout = () => { localStorage.removeItem('anomalydash_token'); localStorage.removeItem('anomalydash_user'); setCurrentUser(null); navigate('home'); };
 
   return (
     <main className={`app-shell theme-${theme}`} style={{ '--font-scale': fontScale } as CSSProperties}>
@@ -520,18 +610,27 @@ function App() {
 
       {view === 'home' && <><section className="hero"><div className="hero-copy"><div className="eyebrow">INTELLIGENT EXAMINATION MONITORING</div><h1>Exams, made<br /><em>more intelligent.</em></h1><p>AnomalyDash helps colleges conduct online examinations while turning unusual behaviour and answering patterns into explainable signals for faculty review.</p><div className="hero-actions"><button className="primary" onClick={() => currentUser ? navigate(currentUser.role === 'FACULTY' ? 'faculty' : 'student') : openAuth('signin')}>{currentUser ? 'Open Dashboard' : 'Get Started'} <span>→</span></button></div><div className="trust-line"><span>●</span> Faculty stays in control · Minimum-data monitoring · No webcam required</div></div><div className="hero-visual"><div className="visual-orbit orbit-one" /><div className="visual-orbit orbit-two" /><div className="floating-logo"><span>A/</span><small>ANOMALYDASH</small></div><div className="visual-caption">Intelligent Examination Monitoring</div></div></section><section className="overview-grid"><article className="overview-card featured"><span className="card-number">01</span><h2>Conduct exams normally.</h2><p>Questions, marks, duration and student responses live inside one structured examination workflow.</p></article><article className="overview-card"><span className="card-number">02</span><h2>Observe meaningful signals.</h2><p>Focus changes, visibility events, timing shifts and paste metadata are captured without webcam or microphone surveillance.</p></article><article className="overview-card"><span className="card-number">03</span><h2>Investigate, don't assume.</h2><p>Combined evidence highlights unusual sessions while keeping the final decision with faculty.</p></article></section></>}
 
-      {view === 'login' && <section className="auth-page"><div className="auth-card"><span className="eyebrow">ANOMALYDASH ACCESS</span><h1>{authMode === 'signin' ? 'Welcome back' : 'Create your account'}</h1><p className="auth-subtitle">{authMode === 'signin' ? 'Sign in to continue to your AnomalyDash workspace.' : 'Create your AnomalyDash account to get started.'}</p><div className="role-switch"><button className={authMode === 'signin' ? 'selected' : ''} onClick={() => setAuthMode('signin')}>Sign In</button><button className={authMode === 'signup' ? 'selected' : ''} onClick={() => setAuthMode('signup')}>Sign Up</button></div><div className="role-switch"><button className={role === 'faculty' ? 'selected' : ''} onClick={() => setRole('faculty')}>Faculty</button><button className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}>Student</button></div><form onSubmit={handleAuth}>{authMode === 'signup' && <label>Full name<input required value={authForm.name} onChange={e => setAuthForm({...authForm,name:e.target.value})} placeholder="Enter your full name" /></label>}{role === 'student' && <label>Roll number<input required value={authForm.rollNumber} onChange={e => setAuthForm({...authForm,rollNumber:e.target.value})} placeholder="Enter your college roll number" /></label>}<label>Email address<input type="email" required value={authForm.email} onChange={e => setAuthForm({...authForm,email:e.target.value})} placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label><label>Password<input type="password" required minLength={6} value={authForm.password} onChange={e => setAuthForm({...authForm,password:e.target.value})} placeholder="Enter your password" /></label>{authMode === 'signup' && <label>Confirm password<input type="password" required minLength={6} value={authForm.confirmPassword} onChange={e => setAuthForm({...authForm,confirmPassword:e.target.value})} placeholder="Confirm your password" /></label>}<button className="primary full" type="submit" disabled={authLoading}>{authLoading ? 'Authenticating…' : authMode === 'signin' ? 'Sign in' : 'Create account'} as {role === 'faculty' ? 'Faculty' : 'Student'} <span>→</span></button></form>{authError && <div className="auth-error" role="alert"><strong>Authentication failed</strong><span>{authError}</span></div>}{authSuccess && <div className="auth-success" role="status">{authSuccess}</div>}<p className="auth-note">Your credentials are verified against the AnomalyDash database before entering your role workspace.</p><button className="back-link" onClick={() => navigate('home')}>← Back to overview</button></div></section>}
+      {view === 'login' && <section className="auth-page"><div className="auth-card"><span className="eyebrow">ANOMALYDASH ACCESS</span><h1>{authMode === 'signin' ? 'Welcome back' : 'Create your account'}</h1><p className="auth-subtitle">{authMode === 'signin' ? 'Sign in to continue to your AnomalyDash workspace.' : 'Create your AnomalyDash account to get started.'}</p><div className="role-switch"><button className={authMode === 'signin' ? 'selected' : ''} onClick={() => setAuthMode('signin')}>Sign In</button><button className={authMode === 'signup' ? 'selected' : ''} onClick={() => setAuthMode('signup')}>Sign Up</button></div><div className="role-switch"><button className={role === 'faculty' ? 'selected' : ''} onClick={() => setRole('faculty')}>Faculty</button><button className={role === 'student' ? 'selected' : ''} onClick={() => setRole('student')}>Student</button></div><form onSubmit={handleAuth}>{authMode === 'signup' && <label>Full name<input required value={authForm.name} onChange={e => setAuthForm({...authForm,name:e.target.value})} placeholder="Enter your full name" /></label>}{role === 'student' && <label>Roll number<input required value={authForm.rollNumber} onChange={e => setAuthForm({...authForm,rollNumber:e.target.value})} placeholder="Enter your college roll number" /></label>}<label>Email address<input type="email" required value={authForm.email} onChange={e => setAuthForm({...authForm,email:e.target.value})} placeholder={role === 'faculty' ? 'faculty@college.edu' : 'student@college.edu'} /></label><label>Password<input type="password" required minLength={10} value={authForm.password} onChange={e => setAuthForm({...authForm,password:e.target.value})} placeholder="Enter your password" /></label>{authMode === 'signup' && role === 'faculty' && <label>Faculty invitation code<input required value={authForm.facultySignupCode} onChange={e => setAuthForm({...authForm,facultySignupCode:e.target.value})} placeholder="Provided by your administrator" /></label>}{authMode === 'signup' && <label>Confirm password<input type="password" required minLength={10} value={authForm.confirmPassword} onChange={e => setAuthForm({...authForm,confirmPassword:e.target.value})} placeholder="Confirm your password" /></label>}<button className="primary full" type="submit" disabled={authLoading}>{authLoading ? 'Authenticating…' : authMode === 'signin' ? 'Sign in' : 'Create account'} as {role === 'faculty' ? 'Faculty' : 'Student'} <span>→</span></button></form>{authError && <div className="auth-error" role="alert"><strong>Authentication failed</strong><span>{authError}</span></div>}{authSuccess && <div className="auth-success" role="status">{authSuccess}</div>}<p className="auth-note">Your credentials are verified against the AnomalyDash database before entering your role workspace.</p><button className="back-link" onClick={() => navigate('home')}>← Back to overview</button></div></section>}
 
-      {view === 'faculty' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY DASHBOARD</span><h1>Create and publish tests.</h1><p>Welcome, {currentUser.name}. Build a test, add questions, then publish it to generate a student-ready join flow.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="workspace-grid"><form className="form-card" onSubmit={createExam}><span className="label">PHASE 3 · TEST BUILDER</span><h2>New test</h2><p>Create the examination record first. A unique test code and URL are generated automatically.</p><label>Test name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Data Structures Mid Term" /></label><label>Subject<input required value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="e.g. Data Structures" /></label><label>Duration (minutes)<input type="number" min="1" max="300" required value={form.durationMin} onChange={e=>setForm({...form,durationMin:e.target.value})} /></label><div className="threshold-config"><span className="label">ANOMALY THRESHOLDS · 1–100</span><p>Choose when a score becomes Low, Medium or High. Keep values in ascending order.</p><label>Low from<input type="number" min="1" max="99" required value={form.lowThreshold} onChange={e=>setForm({...form,lowThreshold:e.target.value})} /></label><label>Medium from<input type="number" min="2" max="100" required value={form.mediumThreshold} onChange={e=>setForm({...form,mediumThreshold:e.target.value})} /></label><label>High from<input type="number" min="3" max="100" required value={form.highThreshold} onChange={e=>setForm({...form,highThreshold:e.target.value})} /></label>{!(Number(form.lowThreshold)<Number(form.mediumThreshold)&&Number(form.mediumThreshold)<Number(form.highThreshold))&&<small className="threshold-error">Set thresholds in ascending order: Low &lt; Medium &lt; High.</small>}</div><button className="primary full" disabled={creating || dbStatus !== 'connected'}>{creating ? 'Creating test…' : 'Create new test →'}</button></form><div className="data-card"><div className="data-card-heading"><div><span className="label">MY TESTS</span><h2>{exams.filter(e=>e.status !== 'COMPLETED').length} records</h2></div><span className="connected-badge">{dbStatus === 'connected' ? 'CONNECTED' : 'OFFLINE'}</span></div>{exams.map(exam=><div className={`exam-row ${selectedExam?.id === exam.id ? 'selected-row' : ''}`} key={exam.id} onClick={()=>setSelectedExam(exam)}><div><strong>{exam.title}</strong><span>{exam.subject} · {exam.durationMin} min · {exam._count?.questions ?? 0} questions</span>{exam.status === 'LIVE' && exam.joinCode && <small>Code: <b>{exam.joinCode}</b></small>}</div><b>{exam.status}</b></div>)}</div></div>{selectedExam && <section className="builder-panel"><div className="builder-head"><div><span className="label">TEST CONFIGURATION</span><h2>{selectedExam.title}</h2><p>{selectedExam.status === 'LIVE' ? 'This test is live. Students can join using the code and URL below.' : 'Add at least one question, then publish this test.'}</p></div>{selectedExam.status === 'LIVE' && <div className="test-credentials"><span>TEST CODE <b>{selectedExam.joinCode}</b></span><span>TEST URL <b>{selectedExam.accessUrl}</b></span></div>}</div>{selectedExam.status === 'DRAFT' && <form className="question-form" onSubmit={addQuestion}><label>Question type<select value={questionForm.type} onChange={e=>setQuestionForm({...questionForm,type:e.target.value})}><option value="MCQ">Multiple choice</option><option value="DESCRIPTIVE">Descriptive</option></select></label><label>Question<input required value={questionForm.prompt} onChange={e=>setQuestionForm({...questionForm,prompt:e.target.value})} placeholder="Enter the question" /></label><label>Marks<input type="number" min="1" required value={questionForm.marks} onChange={e=>setQuestionForm({...questionForm,marks:e.target.value})} /></label>{questionForm.type === 'MCQ' && <><div className="mcq-option-fields"><span className="field-label">Answer options</span>{['A','B','C','D'].map((letter,index)=><label key={letter}>Option {letter}<input required={index < 2} value={(questionForm.options.split('|')[index] || '')} onChange={e=>{const options=questionForm.options.split('|'); while(options.length<4) options.push(''); options[index]=e.target.value; setQuestionForm({...questionForm,options:options.slice(0,4).join('|')});}} placeholder={`Enter option ${letter}`} /></label>)}</div><label>Correct option<select required value={questionForm.answerKey} onChange={e=>setQuestionForm({...questionForm,answerKey:e.target.value})}><option value="A">Option A</option><option value="B">Option B</option><option value="C">Option C</option><option value="D">Option D</option></select></label><p className="form-hint">Choose the correct option. MCQs are graded automatically when students submit.</p></>}<button className="primary" disabled={addingQuestion}>{addingQuestion ? 'Adding…' : 'Add question'}</button></form>}{selectedExam.status !== 'DRAFT' && <div className="published-lock-note">🔒 This test is published. Questions are locked and can no longer be changed.</div>}<div className="builder-footer"><span>{selectedExam._count?.questions ?? 0} question(s) added</span>{selectedExam.status === 'DRAFT' && <button className="primary" disabled={publishing || endingExam} onClick={publishExam}>{publishing ? 'Publishing…' : 'Publish test →'}</button>}
-{selectedExam.status === 'LIVE' && <button type="button" className="secondary danger-action" disabled={endingExam} onClick={()=>void endLiveSession()}>{endingExam ? 'Ending session…' : 'End live session'}</button>}{selectedExam.status === 'COMPLETED' && <button type="button" className="secondary danger-action" onClick={()=>void deleteCompletedExam(selectedExam)}>Remove completed test</button>}</div></section>}{selectedExam?.status === 'LIVE' && <section className="monitoring-launch"><div><span className="label">PHASE 5 · ANOMALY MONITORING</span><h2>Monitor this live examination.</h2><p>Open the dedicated monitoring screen to watch student behaviour signals in near real time.</p></div><button className="primary" type="button" onClick={() => navigate('faculty-monitoring')}>Open live monitoring →</button></section>}</section>}
+      {view === 'faculty' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY DASHBOARD</span><h1>Create and publish tests.</h1><p>Welcome, {currentUser.name}. Build a test, add questions, then publish it to generate a student-ready join flow.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="workspace-grid"><form className="form-card" onSubmit={createExam}><span className="label">TEST BUILDER</span><h2>New test</h2><p>Create the examination record first. A unique test code and URL are generated automatically.</p><label>Test name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Data Structures Mid Term" /></label><label>Subject<input required value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="e.g. Data Structures" /></label><label>Duration (minutes)<input type="number" min="1" max="300" required value={form.durationMin} onChange={e=>setForm({...form,durationMin:e.target.value})} /></label><div className="threshold-config"><span className="label">ANOMALY THRESHOLDS · 1–100</span><p>Choose when a score becomes Low, Medium or High. Keep values in ascending order.</p><label>Low from<input type="number" min="1" max="99" required value={form.lowThreshold} onChange={e=>setForm({...form,lowThreshold:e.target.value})} /></label><label>Medium from<input type="number" min="2" max="100" required value={form.mediumThreshold} onChange={e=>setForm({...form,mediumThreshold:e.target.value})} /></label><label>High from<input type="number" min="3" max="100" required value={form.highThreshold} onChange={e=>setForm({...form,highThreshold:e.target.value})} /></label>{!(Number(form.lowThreshold)<Number(form.mediumThreshold)&&Number(form.mediumThreshold)<Number(form.highThreshold))&&<small className="threshold-error">Set thresholds in ascending order: Low &lt; Medium &lt; High.</small>}</div><button className="primary full" disabled={creating || dbStatus !== 'connected'}>{creating ? 'Creating test…' : 'Create new test →'}</button></form><div className="data-card"><div className="data-card-heading"><div><span className="label">MY TESTS</span><h2>{exams.filter(e=>e.status !== 'COMPLETED').length} records</h2></div><span className="connected-badge">{dbStatus === 'connected' ? 'CONNECTED' : 'OFFLINE'}</span></div>{exams.map(exam=><div className={`exam-row ${selectedExam?.id === exam.id ? 'selected-row' : ''}`} key={exam.id} onClick={()=>{setSelectedExam(exam); if (exam.status === 'DRAFT') void loadExamQuestions(exam); else { setExamQuestions([]); setEditingQuestionId(null); }}}><div><strong>{exam.title}</strong><span>{exam.subject} · {exam.durationMin} min · {exam._count?.questions ?? 0} questions</span>{exam.status === 'LIVE' && exam.joinCode && <small>Code: <b>{exam.joinCode}</b></small>}</div><b>{exam.status}</b></div>)}</div></div>{selectedExam && <section className="builder-panel"><div className="builder-head"><div><span className="label">TEST CONFIGURATION</span><h2>{selectedExam.title}</h2><p>{selectedExam.status === 'LIVE' ? 'This test is live. Students can join using the code and URL below.' : 'Add at least one question, then publish this test.'}</p></div>{selectedExam.status === 'LIVE' && <div className="test-credentials"><span>TEST CODE <b>{selectedExam.joinCode}</b></span><span>TEST URL <b>{selectedExam.accessUrl}</b></span></div>}</div>{selectedExam.status === 'DRAFT' && <form className="question-form" onSubmit={addQuestion}><label>Question type<select value={questionForm.type} onChange={e=>setQuestionForm({...questionForm,type:e.target.value})}><option value="MCQ">Multiple choice</option><option value="DESCRIPTIVE">Descriptive</option></select></label><label>Question<input required value={questionForm.prompt} onChange={e=>setQuestionForm({...questionForm,prompt:e.target.value})} placeholder="Enter the question" /></label><label>Marks<input type="number" min="1" required value={questionForm.marks} onChange={e=>setQuestionForm({...questionForm,marks:e.target.value})} /></label>{questionForm.type === 'MCQ' && <><div className="mcq-option-fields"><span className="field-label">Answer options</span>{['A','B','C','D'].map((letter,index)=><label key={letter}>Option {letter}<input required={index < 2} value={(questionForm.options.split('|')[index] || '')} onChange={e=>{const options=questionForm.options.split('|'); while(options.length<4) options.push(''); options[index]=e.target.value; setQuestionForm({...questionForm,options:options.slice(0,4).join('|')});}} placeholder={`Enter option ${letter}`} /></label>)}</div><label>Correct option<select required value={questionForm.answerKey} onChange={e=>setQuestionForm({...questionForm,answerKey:e.target.value})}><option value="A">Option A</option><option value="B">Option B</option><option value="C">Option C</option><option value="D">Option D</option></select></label><p className="form-hint">Choose the correct option. MCQs are graded automatically when students submit.</p></>}<button className="primary" disabled={addingQuestion}>{addingQuestion ? 'Adding…' : 'Add question'}</button></form>}{selectedExam.status !== 'DRAFT' && <div className="published-lock-note">🔒 This test is published. Questions are locked and can no longer be changed.</div>}{selectedExam.status === 'DRAFT' && <section className="exam-question-list">
+          <div className="data-card-heading"><div><span className="label">QUESTIONS IN THIS TEST</span><h3>{examQuestions.length} question(s)</h3></div></div>
+          {examQuestions.length === 0 && <p className="form-hint">No questions added yet. Add your first question using the form above.</p>}
+          {examQuestions.map((question, index) => <article className="exam-question-item" key={question.id}>
+            {editingQuestionId === question.id ? <form className="question-form question-edit-form" onSubmit={saveQuestionEdit}>
+              <div className="question-item-heading"><strong>Edit question {index + 1}</strong></div>
+              <label>Question type<select value={editQuestionForm.type} onChange={e => setEditQuestionForm({...editQuestionForm, type:e.target.value})}><option value="MCQ">Multiple choice</option><option value="DESCRIPTIVE">Descriptive</option></select></label>
+              <label>Question<input required value={editQuestionForm.prompt} onChange={e => setEditQuestionForm({...editQuestionForm, prompt:e.target.value})} /></label>
+              <label>Marks<input type="number" min="1" max="100" required value={editQuestionForm.marks} onChange={e => setEditQuestionForm({...editQuestionForm, marks:e.target.value})} /></label>
+              {editQuestionForm.type === 'MCQ' && <><div className="mcq-option-fields"><span className="field-label">Answer options</span>{['A','B','C','D'].map((letter, optionIndex) => <label key={letter}>Option {letter}<input required={optionIndex < 2} value={(editQuestionForm.options.split('|')[optionIndex] || '')} onChange={e => { const options = editQuestionForm.options.split('|'); while (options.length < 4) options.push(''); options[optionIndex] = e.target.value; setEditQuestionForm({...editQuestionForm, options:options.slice(0,4).join('|')}); }} /></label>)}</div><label>Correct option<select required value={editQuestionForm.answerKey} onChange={e => setEditQuestionForm({...editQuestionForm, answerKey:e.target.value})}><option value="A">Option A</option><option value="B">Option B</option><option value="C">Option C</option><option value="D">Option D</option></select></label></>}
+              <div className="question-item-actions"><button className="primary" type="submit" disabled={savingQuestionEdit}>{savingQuestionEdit ? 'Saving…' : 'Save changes'}</button><button className="secondary" type="button" onClick={() => setEditingQuestionId(null)}>Cancel</button></div>
+            </form> : <><div className="question-item-heading"><strong>Q{index + 1}. {question.prompt}</strong><span>{question.marks} mark(s) · {question.type === 'MCQ' ? 'Multiple choice' : 'Descriptive'}</span></div>
+              {question.type === 'MCQ' && <ol type="A" className="question-preview-options">{(question.options || '').split('|').filter(Boolean).map((option, optionIndex) => <li key={optionIndex}>{option}</li>)}</ol>}
+              {selectedExam.status === 'DRAFT' && <div className="question-item-actions"><button type="button" className="secondary" onClick={() => beginEditQuestion(question)}>Edit question</button></div>}
+            </>}
+          </article>)}
+        </section>}<div className="builder-footer"><span>{selectedExam._count?.questions ?? 0} question(s) added</span>{selectedExam.status === 'DRAFT' && <button className="primary" disabled={publishing || endingExam} onClick={publishExam}>{publishing ? 'Publishing…' : 'Publish test →'}</button>}
+{selectedExam.status === 'LIVE' && <>{confirmEndingExam && <span role="status" className="end-session-prompt">End this session and close active attempts?</span>}<button type="button" className="secondary danger-action" disabled={endingExam} onClick={()=>void endLiveSession()}>{endingExam ? 'Ending session…' : confirmEndingExam ? 'Confirm end session' : 'End live session'}</button>{confirmEndingExam && !endingExam && <button type="button" className="secondary" onClick={()=>setConfirmEndingExam(false)}>Cancel</button>}</>}{selectedExam.status === 'COMPLETED' && <button type="button" className="secondary danger-action" onClick={()=>void deleteCompletedExam(selectedExam)}>Remove completed test</button>}</div></section>}{selectedExam?.status === 'LIVE' && <section className="monitoring-launch"><div><span className="label">ANOMALY MONITORING</span><h2>Monitor this live examination.</h2><p>Open the dedicated monitoring screen to watch student behaviour signals in near real time.</p></div><button className="primary" type="button" onClick={() => navigate('faculty-monitoring')}>Open live monitoring →</button></section>}</section>}
 
-      {view === 'faculty-monitoring' && currentUser?.role === 'FACULTY' && <section className="page workspace monitoring-page">
-        <div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('faculty')}>← Back to Faculty Dashboard</button></div>
-        <div className="page-heading"><div><span className="eyebrow">PHASE 5 · LIVE ANOMALY MONITORING</span><h1>Watch live examinations.</h1><p>Student behaviour signals are refreshed every 1.5 seconds. Use these indicators for faculty review, not as automatic proof of misconduct.</p></div><span className="monitoring-live">● LIVE FEED</span></div>
-        <div className="monitoring-toolbar"><label>Select live examination<select value={selectedExam?.id || ''} onChange={e=>setSelectedExam(exams.find(exam=>exam.id===e.target.value) || null)}><option value="">Choose a live exam</option>{exams.filter(exam=>exam.status === 'LIVE').map(exam=><option key={exam.id} value={exam.id}>{exam.title} · {exam.subject}</option>)}</select></label><div className="monitoring-refresh"><span>● AUTO REFRESH</span><b>1.5s</b></div>{selectedExam && <div className="monitoring-threshold-summary">Risk thresholds: <b>Low {selectedExam.lowThreshold ?? 30}+</b> · <b>Medium {selectedExam.mediumThreshold ?? 60}+</b> · <b>High {selectedExam.highThreshold ?? 80}+</b></div>}</div>
-        {!selectedExam ? <div className="monitoring-empty monitoring-empty-large">Select a LIVE examination above to start the monitoring feed.</div> : <><div className="monitoring-stats"><div><span>ACTIVE STUDENTS</span><b>{liveMonitoring.filter(a=>a.status === 'IN_PROGRESS').length}</b></div><div><span>HIGH RISK</span><b className="anomaly-high">{liveMonitoring.filter(a=>a.anomalyLevel === 'HIGH').length}</b></div><div><span>MEDIUM RISK</span><b className="anomaly-medium">{liveMonitoring.filter(a=>a.anomalyLevel === 'MEDIUM').length}</b></div><div><span>SIGNALS</span><b>{liveMonitoring.reduce((total,a)=>total+(a.events?.length || 0),0)}</b></div></div>
-        {liveMonitoring.length === 0 ? <div className="monitoring-empty monitoring-empty-large">No students have started this test yet. The feed will update automatically when an attempt begins.</div> : <div style={{overflowX:'auto',border:'1px solid var(--line, #e5e7eb)',borderRadius:12,background:'var(--surface, #fff)'}}><table style={{width:'100%',borderCollapse:'collapse',textAlign:'left',minWidth:850}}><thead><tr>{['Student','Roll Number','Status','Anomaly Score','Anomaly Level','Latest Signal','Recent Signals','Evidence'].map(heading=><th key={heading} style={{padding:'14px 16px',fontSize:12,letterSpacing:'.04em',textTransform:'uppercase',borderBottom:'1px solid var(--line, #e5e7eb)',whiteSpace:'nowrap',color:'var(--muted, #64748b)'}}>{heading}</th>)}</tr></thead><tbody>{[...liveMonitoring].sort((a:any,b:any)=>b.anomalyScore-a.anomalyScore).map((attempt:any)=><Fragment key={attempt.id}><tr style={{background:attempt.anomalyLevel==='HIGH'?'rgba(220,38,38,.045)':'transparent'}}><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)',fontWeight:600}}>{attempt.student.name}</td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)'}}>{attempt.student.rollNumber || '—'}</td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)',whiteSpace:'nowrap'}}>{attempt.status.replaceAll('_',' ')}</td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)',fontWeight:700,fontVariantNumeric:'tabular-nums'}}>{attempt.anomalyScore}/100</td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)',fontWeight:700,whiteSpace:'nowrap'}}><span className={"monitor-"+String(attempt.anomalyLevel).toLowerCase()}>{attempt.anomalyLevel}</span></td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)',whiteSpace:'nowrap'}}>{attempt.events?.[0]?.type?.replaceAll('_',' ') || 'None'}</td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)',minWidth:220}}>{Object.entries((attempt.events || []).reduce((counts:any,event:any)=>{counts[event.type]=(counts[event.type]||0)+1;return counts;},{})).map(([type,count])=>`${type.replaceAll('_',' ')} ×${count}`).join(' · ') || 'No signals recorded'}</td><td style={{padding:'14px 16px',borderBottom:'1px solid var(--line, #e5e7eb)'}}><button type="button" className="secondary evidence-toggle" aria-expanded={expandedAttemptId===attempt.id} onClick={()=>setExpandedAttemptId(current=>current===attempt.id?null:attempt.id)}>{expandedAttemptId===attempt.id?'Hide':'Inspect'} ({attempt.events?.length || 0})</button></td></tr>{expandedAttemptId===attempt.id&&<tr><td colSpan={8} className="evidence-cell"><div className="evidence-panel"><strong>Behaviour feature summary · {attempt.student.name}</strong>{attempt.features ? <div className="monitoring-stats"><div><span>Tab switches</span><b>{attempt.features.tabSwitchCount}</b></div><div><span>Focus losses</span><b>{attempt.features.focusLossCount}</b></div><div><span>Total away</span><b>{Math.round(attempt.features.totalAwayMs/1000)}s</b></div><div><span>Max away</span><b>{Math.round(attempt.features.maxAwayMs/1000)}s</b></div><div><span>Paste events</span><b>{attempt.features.pasteCount}</b></div><div><span>Answer changes</span><b>{attempt.features.answerChangeCount}</b></div><div><span>Avg response</span><b>{Math.round(attempt.features.averageResponseMs/1000)}s</b></div><div><span>Response deviation</span><b>{Math.round(attempt.features.responseTimeDeviationMs/1000)}s</b></div><div><span>Skipped</span><b>{attempt.features.skippedQuestionCount}</b></div><div><span>Unanswered</span><b>{attempt.features.unansweredQuestionCount}</b></div></div> : <p>Feature summary will appear when the backend has processed this attempt.</p>}<strong>Evidence timeline · {attempt.student.name}</strong>{(attempt.events||[]).length===0?<p>No monitoring signals recorded for this attempt.</p>:<ol>{attempt.events.map((event:any)=><li key={event.id}><div><b>{event.type.replaceAll('_',' ')}</b><time>{new Date(event.createdAt).toLocaleString()}</time></div><p>{event.metadata ? (()=>{try{return Object.entries(JSON.parse(event.metadata)).map(([key,value])=>`${key}: ${String(value)}`).join(' · ')}catch{return event.metadata}})() : 'No additional event metadata was recorded.'}</p></li>)}</ol>}<p className="evidence-disclaimer">These are behavioural signals for faculty review, not proof of misconduct.</p></div></td></tr>}</Fragment>)}</tbody></table></div>}</>}
-      </section>}
 
       {view === 'faculty-history' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY HISTORY</span><h1>Past examinations.</h1><p>Review completed tests, participating students, scores and recorded anomaly signals.</p></div><button className="secondary" onClick={()=>void loadFacultyHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading examination history…</p></div> : facultyHistory.length === 0 ? <div className="data-card"><p>No completed examinations yet.</p></div> : <div className="history-list">{facultyHistory.map((exam:any)=><article className="history-card" key={exam.id}><div className="history-card-head"><div><span className="label">COMPLETED TEST</span><h2>{exam.title}</h2><p>{exam.subject} · {exam.durationMin} min · {exam.attempts.length} student attempt(s)</p></div><span className="history-status">COMPLETED</span></div><div className="history-attempts">{exam.attempts.length === 0 ? <p>No student attempts recorded.</p> : exam.attempts.map((attempt:any)=><div className="history-attempt" key={attempt.id}><div><strong>{attempt.student.name}</strong><span>{attempt.student.rollNumber || attempt.student.email}</span></div><div><b>{attempt.score ?? 0} marks</b><span>{attempt.status}</span></div><div><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel} · {attempt.anomalyScore}</b><span>Anomaly score</span></div></div>)}</div></article>)}</div>}</section>}
 
@@ -539,7 +638,7 @@ function App() {
 
       {view === 'student-history' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">PAST EXAMS</span><h1>Your examination history.</h1><p>Review the tests you have completed and the results recorded for each attempt.</p></div><button className="secondary" onClick={()=>void loadStudentHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading past exams…</p></div> : studentHistory.length === 0 ? <div className="data-card"><p>You have no completed exams yet.</p></div> : <div className="history-list">{studentHistory.map((attempt:any)=><article className="history-card student-history-card" key={attempt.id}><div><span className="label">PAST EXAM</span><h2>{attempt.exam.title}</h2><p>{attempt.exam.subject} · Faculty: {attempt.exam.faculty.name}</p></div><div className="student-result-grid"><div><span>STATUS</span><b>{attempt.status}</b></div><div><span>SCORE</span><b>{attempt.score ?? 0}</b></div><div><span>SUBMITTED</span><b>{attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : '—'}</b></div></div></article>)}</div>}</section>}
 
-      {view === 'student' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">STUDENT DASHBOARD</span><h1>Join your test.</h1><p>Welcome, {currentUser.name}. Enter the test URL and code shared by your faculty to continue.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="join-layout"><form className="join-card" onSubmit={handleJoin}><span className="label">PHASE 2 · TEST ACCESS</span><h2>Enter test details</h2><p>Use the exact URL and test code provided by your faculty.</p><label>Test URL<input required value={joinForm.testUrl} onChange={e=>setJoinForm({...joinForm,testUrl:e.target.value})} placeholder="http://localhost:5173/#/test/..." /></label><label>Test code<input required value={joinForm.joinCode} onChange={e=>setJoinForm({...joinForm,joinCode:e.target.value.toUpperCase()})} placeholder="e.g. 8F3A2C1D" /></label><button className="primary full" type="submit">Verify and join test →</button>{joinError && <div className="join-feedback error">{joinError}</div>}{joinMessage && <div className="join-feedback success">{joinMessage}</div>}</form><div className="info-card"><span className="label">STUDENT ACCESS</span><h2>Simple. Controlled. Traceable.</h2><div><b>01</b><span>Faculty creates and publishes the test.</span></div><div><b>02</b><span>You receive the test URL and unique code.</span></div><div><b>03</b><span>AnomalyDash verifies both before the exam session begins.</span></div></div></div></section>}
+      {view === 'student' && currentUser?.role === 'STUDENT' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">STUDENT DASHBOARD</span><h1>Join your test.</h1><p>Welcome, {currentUser.name}. Enter the test URL and code shared by your faculty to continue.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="join-layout"><form className="join-card" onSubmit={handleJoin}><span className="label">TEST ACCESS</span><h2>Enter test details</h2><p>Use the exact URL and test code provided by your faculty.</p><label>Test URL<input required value={joinForm.testUrl} onChange={e=>setJoinForm({...joinForm,testUrl:e.target.value})} placeholder="http://localhost:5173/#/test/..." /></label><label>Test code<input required value={joinForm.joinCode} onChange={e=>setJoinForm({...joinForm,joinCode:e.target.value.toUpperCase()})} placeholder="e.g. 8F3A2C1D" /></label><button className="primary full" type="submit">Verify and join test →</button>{joinError && <div className="join-feedback error">{joinError}</div>}{joinMessage && <div className="join-feedback success">{joinMessage}</div>}</form><div className="info-card"><span className="label">STUDENT ACCESS</span><h2>Simple. Controlled. Traceable.</h2><div><b>01</b><span>Faculty creates and publishes the test.</span></div><div><b>02</b><span>You receive the test URL and unique code.</span></div><div><b>03</b><span>AnomalyDash verifies both before the exam session begins.</span></div></div></div></section>}
 
       <footer><span>AnomalyDash · CodeMatriX</span><span>Intelligent online examination platform</span></footer>
     </main>
