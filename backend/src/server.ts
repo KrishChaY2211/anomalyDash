@@ -463,6 +463,20 @@ app.get('/api/exams/:id', async (req, res) => {
   return res.json(auth.role === 'FACULTY' ? exam : publicExam);
 });
 
+app.get('/api/exams/:id/questions', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
+  try {
+    const exam = await prisma.exam.findUnique({ where: { id: req.params.id }, select: { id: true, facultyId: true } });
+    if (!exam) return res.status(404).json({ message: 'Test not found' });
+    if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the test owner can view these questions' });
+    const questions = await prisma.question.findMany({ where: { examId: exam.id }, orderBy: { createdAt: 'asc' } });
+    return res.json(questions);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not load test questions' });
+  }
+});
+
 app.post('/api/exams/:id/questions', async (req, res) => {
   if (!requireRole(req, res, 'FACULTY')) return;
   const { type, prompt, marks, options, answerKey } = req.body;
@@ -482,6 +496,37 @@ app.post('/api/exams/:id/questions', async (req, res) => {
     }
   });
   return res.status(201).json(question);
+});
+
+app.patch('/api/exams/:id/questions/:questionId', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
+  try {
+    const { type, prompt, marks, options, answerKey } = req.body;
+    const cleanPrompt = String(prompt ?? '').trim();
+    const numericMarks = Number(marks);
+    if (!cleanPrompt || !['MCQ', 'DESCRIPTIVE'].includes(type) || !Number.isInteger(numericMarks) || numericMarks < 1 || numericMarks > 100) {
+      return res.status(400).json({ message: 'Question text, type and marks (1–100) are required' });
+    }
+    const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
+    if (!exam) return res.status(404).json({ message: 'Test not found' });
+    if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the test owner can edit questions' });
+    if (exam.status !== 'DRAFT') return res.status(409).json({ message: 'Questions are locked after the test is published' });
+    const question = await prisma.question.findFirst({ where: { id: req.params.questionId, examId: exam.id } });
+    if (!question) return res.status(404).json({ message: 'Question not found in this test' });
+    const cleanOptions = type === 'MCQ' ? String(options ?? '').split('|').map((value: string) => value.trim()).filter(Boolean) : [];
+    const cleanAnswerKey = type === 'MCQ' ? String(answerKey ?? '').trim() : '';
+    if (type === 'MCQ' && (cleanOptions.length < 2 || !cleanAnswerKey || !cleanOptions.includes(cleanAnswerKey))) {
+      return res.status(400).json({ message: 'MCQs need at least two options and a correct answer matching one option' });
+    }
+    const updated = await prisma.question.update({
+      where: { id: question.id },
+      data: { type, prompt: cleanPrompt, marks: numericMarks, options: cleanOptions.length ? cleanOptions.join('|') : null, answerKey: cleanAnswerKey || null }
+    });
+    return res.json(updated);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not update question' });
+  }
 });
 
 app.patch('/api/exams/:id/end', async (req, res) => {
