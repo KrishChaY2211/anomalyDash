@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 
-type View = 'home' | 'login' | 'faculty' | 'student' | 'exam' | 'faculty-history' | 'student-history' | 'faculty-monitoring';
+type View = 'home' | 'login' | 'faculty' | 'student' | 'exam' | 'faculty-history' | 'student-history' | 'faculty-monitoring' | 'question-bank';
 type Role = 'faculty' | 'student';
 type AuthMode = 'signin' | 'signup';
 
@@ -37,6 +37,7 @@ function getInitialView(): View {
   if (hash === 'login') return 'login';
   if (hash === 'exam' || hash.startsWith('exam/')) return 'exam';
   if (hash === 'faculty-history') return 'faculty-history';
+  if (hash === 'question-bank') return 'question-bank';
   if (hash === 'faculty-monitoring') return 'faculty-monitoring';
   if (hash === 'student-history') return 'student-history';
   return 'home';
@@ -92,6 +93,14 @@ function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [liveMonitoring, setLiveMonitoring] = useState<any[]>([]);
   const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
+  const [questionBank, setQuestionBank] = useState<any[]>([]);
+  const [bankSearch, setBankSearch] = useState('');
+  const [bankMessage, setBankMessage] = useState('');
+  const [bankError, setBankError] = useState('');
+  const [bankSaving, setBankSaving] = useState(false);
+  const [bankForm, setBankForm] = useState({ subject: '', topic: '', type: 'MCQ', prompt: '', marks: '1', options: ['', '', '', ''], answerIndex: '0', answerKey: '' });
+  const [bankTargetExam, setBankTargetExam] = useState('');
+  const [bankLoading, setBankLoading] = useState(false);
 
   const statusLabel = dbStatus === 'connected' ? 'Database connected' : dbStatus === 'checking' ? 'Checking database' : 'Database offline';
 
@@ -480,6 +489,52 @@ function App() {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [view, selectedExam?.id, selectedExam?.status]);
 
+  const loadQuestionBank = async () => {
+    setBankLoading(true); setBankError('');
+    try {
+      const response = await apiFetch('/api/question-bank');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not load question bank');
+      setQuestionBank(data);
+    } catch (error) { setBankError(error instanceof Error ? error.message : 'Could not load question bank'); }
+    finally { setBankLoading(false); }
+  };
+
+  const saveBankQuestion = async (event: FormEvent) => {
+    event.preventDefault(); setBankError(''); setBankMessage('');
+    const options = bankForm.options.map(value => value.trim()).filter(Boolean);
+    const answerKey = bankForm.type === 'MCQ' ? (options[Number(bankForm.answerIndex)] || '') : bankForm.answerKey.trim();
+    if (bankForm.type === 'MCQ' && (options.length < 2 || !answerKey)) {
+      setBankError('Enter at least two answer options and select the correct one.'); return;
+    }
+    setBankSaving(true);
+    try {
+      const response = await apiFetch('/api/question-bank', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject: bankForm.subject, topic: bankForm.topic, type: bankForm.type, prompt: bankForm.prompt, marks: Number(bankForm.marks), options: options.join('|'), answerKey })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not save question');
+      setQuestionBank(items => [data, ...items]);
+      setBankMessage('Question saved to your Question Bank.');
+      setBankForm({ subject: '', topic: '', type: 'MCQ', prompt: '', marks: '1', options: ['', '', '', ''], answerIndex: '0', answerKey: '' });
+    } catch (error) { setBankError(error instanceof Error ? error.message : 'Could not save question'); }
+    finally { setBankSaving(false); }
+  };
+
+  const addBankQuestionToExam = async (item: any) => {
+    setBankError(''); setBankMessage('');
+    try {
+      const response = await apiFetch('/api/question-bank/' + item.id + '/add-to-exam', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ examId: bankTargetExam })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Could not add question to exam');
+      setBankMessage('Question copied into the selected draft. The saved bank question remains unchanged.');
+      setExams(previous => previous.map(exam => exam.id === bankTargetExam ? { ...exam, _count: { questions: (exam._count?.questions || 0) + 1 } } : exam));
+    } catch (error) { setBankError(error instanceof Error ? error.message : 'Could not add question to exam'); }
+  };
+
   const loadFacultyHistory = async () => {
     if (!currentUser || currentUser.role !== 'FACULTY') return;
     setHistoryLoading(true);
@@ -512,7 +567,7 @@ function App() {
         <button className="brand brand-button" onClick={() => navigate('home')}><div className="brand-mark">A/</div><div><strong>AnomalyDash</strong><span>by CodeMatriX</span></div></button>
         <div className="nav-actions">
           <button className={`nav-link ${view === 'home' ? 'active' : ''}`} onClick={() => navigate('home')}>Overview</button>
-          {currentUser?.role === 'FACULTY' && <><button className={`nav-link ${view === 'faculty' ? 'active' : ''}`} onClick={() => navigate('faculty')}>Faculty</button><button className={`nav-link ${view === 'faculty-monitoring' ? 'active' : ''}`} onClick={() => navigate('faculty-monitoring')}>Live Monitoring</button><button className={`nav-link ${view === 'faculty-history' ? 'active' : ''}`} onClick={() => { navigate('faculty-history'); void loadFacultyHistory(); }}>History</button></>}
+          {currentUser?.role === 'FACULTY' && <><button className={`nav-link ${view === 'faculty' ? 'active' : ''}`} onClick={() => navigate('faculty')}>Faculty</button><button className={`nav-link ${view === 'faculty-monitoring' ? 'active' : ''}`} onClick={() => navigate('faculty-monitoring')}>Live Monitoring</button><button className={`nav-link ${view === "question-bank" ? "active" : ""}`} onClick={() => { navigate("question-bank"); void loadQuestionBank(); }}>Question Bank</button><button className={`nav-link ${view === 'faculty-history' ? 'active' : ''}`} onClick={() => { navigate('faculty-history'); void loadFacultyHistory(); }}>History</button></>}
           {currentUser?.role === 'STUDENT' && <><button className={`nav-link ${view === 'student' ? 'active' : ''}`} onClick={() => navigate('student')}>Student</button><button className={`nav-link ${view === 'student-history' ? 'active' : ''}`} onClick={() => { navigate('student-history'); void loadStudentHistory(); }}>Past Exams</button></>}
           {currentUser && <button className="nav-link" onClick={logout}>Sign out</button>}
         </div>
@@ -535,6 +590,31 @@ function App() {
 
       {view === 'faculty' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY DASHBOARD</span><h1>Create and publish tests.</h1><p>Welcome, {currentUser.name}. Build a test, add questions, then publish it to generate a student-ready join flow.</p></div><button className="secondary" onClick={logout}>Sign out</button></div><div className="workspace-grid"><form className="form-card" onSubmit={createExam}><span className="label">PHASE 3 · TEST BUILDER</span><h2>New test</h2><p>Create the examination record first. A unique test code and URL are generated automatically.</p><label>Test name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Data Structures Mid Term" /></label><label>Subject<input required value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} placeholder="e.g. Data Structures" /></label><label>Duration (minutes)<input type="number" min="1" max="300" required value={form.durationMin} onChange={e=>setForm({...form,durationMin:e.target.value})} /></label><div className="threshold-config"><span className="label">ANOMALY THRESHOLDS · 1–100</span><p>Choose when a score becomes Low, Medium or High. Keep values in ascending order.</p><label>Low from<input type="number" min="1" max="99" required value={form.lowThreshold} onChange={e=>setForm({...form,lowThreshold:e.target.value})} /></label><label>Medium from<input type="number" min="2" max="100" required value={form.mediumThreshold} onChange={e=>setForm({...form,mediumThreshold:e.target.value})} /></label><label>High from<input type="number" min="3" max="100" required value={form.highThreshold} onChange={e=>setForm({...form,highThreshold:e.target.value})} /></label>{!(Number(form.lowThreshold)<Number(form.mediumThreshold)&&Number(form.mediumThreshold)<Number(form.highThreshold))&&<small className="threshold-error">Set thresholds in ascending order: Low &lt; Medium &lt; High.</small>}</div><button className="primary full" disabled={creating || dbStatus !== 'connected'}>{creating ? 'Creating test…' : 'Create new test →'}</button></form><div className="data-card"><div className="data-card-heading"><div><span className="label">MY TESTS</span><h2>{exams.filter(e=>e.status !== 'COMPLETED').length} records</h2></div><span className="connected-badge">{dbStatus === 'connected' ? 'CONNECTED' : 'OFFLINE'}</span></div>{exams.map(exam=><div className={`exam-row ${selectedExam?.id === exam.id ? 'selected-row' : ''}`} key={exam.id} onClick={()=>setSelectedExam(exam)}><div><strong>{exam.title}</strong><span>{exam.subject} · {exam.durationMin} min · {exam._count?.questions ?? 0} questions</span>{exam.status === 'LIVE' && exam.joinCode && <small>Code: <b>{exam.joinCode}</b></small>}</div><b>{exam.status}</b></div>)}</div></div>{selectedExam && <section className="builder-panel"><div className="builder-head"><div><span className="label">TEST CONFIGURATION</span><h2>{selectedExam.title}</h2><p>{selectedExam.status === 'LIVE' ? 'This test is live. Students can join using the code and URL below.' : 'Add at least one question, then publish this test.'}</p></div>{selectedExam.status === 'LIVE' && <div className="test-credentials"><span>TEST CODE <b>{selectedExam.joinCode}</b></span><span>TEST URL <b>{selectedExam.accessUrl}</b></span></div>}</div>{selectedExam.status === 'DRAFT' && <form className="question-form" onSubmit={addQuestion}><label>Question type<select value={questionForm.type} onChange={e=>setQuestionForm({...questionForm,type:e.target.value})}><option value="MCQ">Multiple choice</option><option value="DESCRIPTIVE">Descriptive</option></select></label><label>Question<input required value={questionForm.prompt} onChange={e=>setQuestionForm({...questionForm,prompt:e.target.value})} placeholder="Enter the question" /></label><label>Marks<input type="number" min="1" required value={questionForm.marks} onChange={e=>setQuestionForm({...questionForm,marks:e.target.value})} /></label>{questionForm.type === 'MCQ' && <><div className="mcq-option-fields"><span className="field-label">Answer options</span>{['A','B','C','D'].map((letter,index)=><label key={letter}>Option {letter}<input required={index < 2} value={(questionForm.options.split('|')[index] || '')} onChange={e=>{const options=questionForm.options.split('|'); while(options.length<4) options.push(''); options[index]=e.target.value; setQuestionForm({...questionForm,options:options.slice(0,4).join('|')});}} placeholder={`Enter option ${letter}`} /></label>)}</div><label>Correct option<select required value={questionForm.answerKey} onChange={e=>setQuestionForm({...questionForm,answerKey:e.target.value})}><option value="A">Option A</option><option value="B">Option B</option><option value="C">Option C</option><option value="D">Option D</option></select></label><p className="form-hint">Choose the correct option. MCQs are graded automatically when students submit.</p></>}<button className="primary" disabled={addingQuestion}>{addingQuestion ? 'Adding…' : 'Add question'}</button></form>}{selectedExam.status !== 'DRAFT' && <div className="published-lock-note">🔒 This test is published. Questions are locked and can no longer be changed.</div>}<div className="builder-footer"><span>{selectedExam._count?.questions ?? 0} question(s) added</span>{selectedExam.status === 'DRAFT' && <button className="primary" disabled={publishing || endingExam} onClick={publishExam}>{publishing ? 'Publishing…' : 'Publish test →'}</button>}
 {selectedExam.status === 'LIVE' && <button type="button" className="secondary danger-action" disabled={endingExam} onClick={()=>void endLiveSession()}>{endingExam ? 'Ending session…' : 'End live session'}</button>}{selectedExam.status === 'COMPLETED' && <button type="button" className="secondary danger-action" onClick={()=>void deleteCompletedExam(selectedExam)}>Remove completed test</button>}</div></section>}{selectedExam?.status === 'LIVE' && <section className="monitoring-launch"><div><span className="label">PHASE 5 · ANOMALY MONITORING</span><h2>Monitor this live examination.</h2><p>Open the dedicated monitoring screen to watch student behaviour signals in near real time.</p></div><button className="primary" type="button" onClick={() => navigate('faculty-monitoring')}>Open live monitoring →</button></section>}</section>}
+
+
+      {view === 'question-bank' && currentUser?.role === 'FACULTY' && <section className="page workspace">
+        <div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('faculty')}>← Back to Faculty Dashboard</button></div>
+        <div className="page-heading"><div><span className="eyebrow">FACULTY WORKSPACE</span><h1>Your Question Bank.</h1><p>Save reusable questions once, then copy them into any of your draft examinations.</p></div><button className="secondary" type="button" onClick={() => void loadQuestionBank()}>Refresh questions</button></div>
+        <div className="workspace-grid">
+          <form className="form-card" onSubmit={saveBankQuestion}>
+            <span className="label">ADD QUESTION</span><h2>New bank question</h2><p>Saved questions are private to your faculty account.</p>
+            <label>Subject<input required maxLength={120} value={bankForm.subject} onChange={e=>setBankForm({...bankForm,subject:e.target.value})} placeholder="e.g. Data Structures" /></label>
+            <label>Topic (optional)<input maxLength={120} value={bankForm.topic} onChange={e=>setBankForm({...bankForm,topic:e.target.value})} placeholder="e.g. Queues" /></label>
+            <label>Question type<select value={bankForm.type} onChange={e=>setBankForm({...bankForm,type:e.target.value})}><option value="MCQ">Multiple choice</option><option value="DESCRIPTIVE">Descriptive</option></select></label>
+            <label>Question text<textarea required maxLength={5000} rows={4} value={bankForm.prompt} onChange={e=>setBankForm({...bankForm,prompt:e.target.value})} placeholder="Write the question clearly…" /></label>
+            <label>Marks<input type="number" min="1" max="100" required value={bankForm.marks} onChange={e=>setBankForm({...bankForm,marks:e.target.value})} /></label>
+            {bankForm.type === 'MCQ' ? <><div className="mcq-option-fields"><span className="field-label">Answer options</span>{bankForm.options.map((value,index)=><label key={index}>Option {String.fromCharCode(65+index)}<input required={index<2} maxLength={1000} value={value} onChange={e=>setBankForm({...bankForm,options:bankForm.options.map((option,i)=>i===index?e.target.value:option)})} placeholder={'Enter option '+String.fromCharCode(65+index)} /></label>)}</div><label>Correct option<select value={bankForm.answerIndex} onChange={e=>setBankForm({...bankForm,answerIndex:e.target.value})}>{bankForm.options.map((option,index)=>option.trim()?<option key={index} value={String(index)}>Option {String.fromCharCode(65+index)} — {option.slice(0,45)}</option>:null)}</select></label></> : <label>Reference answer (optional)<textarea rows={3} maxLength={5000} value={bankForm.answerKey} onChange={e=>setBankForm({...bankForm,answerKey:e.target.value})} placeholder="Reference answer for faculty review" /></label>}
+            <button className="primary full" disabled={bankSaving}>{bankSaving ? 'Saving question…' : 'Save to Question Bank →'}</button>
+          </form>
+          <div className="data-card">
+            <div className="data-card-heading"><div><span className="label">SAVED QUESTIONS</span><h2>{questionBank.length} questions</h2></div><span className="connected-badge">PRIVATE</span></div>
+            <label>Search questions<input value={bankSearch} onChange={e=>setBankSearch(e.target.value)} placeholder="Search by text, subject or topic…" /></label>
+            <label>Add to draft exam<select value={bankTargetExam} onChange={e=>setBankTargetExam(e.target.value)}><option value="">Choose a draft exam</option>{exams.filter(exam=>exam.status==='DRAFT').map(exam=><option key={exam.id} value={exam.id}>{exam.title} · {exam.subject}</option>)}</select></label>
+            {bankError && <div className="join-feedback error" role="alert">{bankError}</div>}{bankMessage && <div className="join-feedback success" role="status">{bankMessage}</div>}
+            {bankLoading ? <p>Loading your questions…</p> : questionBank.filter(item=>[item.prompt,item.subject,item.topic||''].some(value=>String(value).toLowerCase().includes(bankSearch.toLowerCase()))).length===0 ? <p>{bankSearch ? 'No questions match that search.' : 'No saved questions yet. Add your first question using the form.'}</p> : questionBank.filter(item=>[item.prompt,item.subject,item.topic||''].some(value=>String(value).toLowerCase().includes(bankSearch.toLowerCase()))).map(item=><article key={item.id} style={{padding:'18px 0',borderBottom:'1px solid var(--line, #e5e7eb)'}}><div className="question-meta"><span>{item.subject}{item.topic ? ' · '+item.topic : ''}</span><b>{item.marks} mark{item.marks===1?'':'s'}</b></div><h3 style={{margin:'8px 0'}}>{item.prompt}</h3><p style={{color:'var(--muted, #64748b)',fontSize:13}}>{item.type==='MCQ'?'Multiple choice':'Descriptive'}{item.type==='MCQ' && item.options ? ' · '+item.options.split('|').length+' options' : ''}</p>{item.type==='MCQ' && <ul>{item.options.split('|').map((option:string,index:number)=><li key={index}>{String.fromCharCode(65+index)}. {option}{option===item.answerKey?' ✓':''}</li>)}</ul>}<button type="button" className="secondary" disabled={!bankTargetExam} onClick={()=>void addBankQuestionToExam(item)}>Add to selected draft →</button></article>)}
+          </div>
+        </div>
+      </section>}
 
       {view === 'faculty-monitoring' && currentUser?.role === 'FACULTY' && <section className="page workspace monitoring-page">
         <div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('faculty')}>← Back to Faculty Dashboard</button></div>
