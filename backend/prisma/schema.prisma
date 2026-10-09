@@ -63,6 +63,7 @@ model Question {
   marks      Int
   options    String?
   answerKey  String?
+  answerKeywords String?
   createdAt  DateTime     @default(now())
   attemptAnswers AttemptAnswer[]
 }
@@ -90,6 +91,7 @@ model ExamAttempt {
   submittedAt DateTime?
   status      AttemptStatus @default(IN_PROGRESS)
   score       Int?
+  gradingStatus String @default("AUTO_GRADED")
   anomalyScore Int @default(0)
   anomalyLevel AnomalyLevel @default(CLEAR)
   exam        Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
