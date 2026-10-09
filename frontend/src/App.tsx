@@ -194,8 +194,15 @@ function App() {
           answerKey
         })
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Could not update question');
+      const responseText = await response.text();
+      let data: any = {};
+      try { data = responseText ? JSON.parse(responseText) : {}; } catch {
+        const hint = responseText.trim().startsWith('<')
+          ? 'The API returned an HTML page instead of JSON. The backend deployment or API URL may be incorrect.'
+          : 'The API returned an invalid response while saving the question.';
+        throw new Error(`${hint} (HTTP ${response.status})`);
+      }
+      if (!response.ok) throw new Error(data.message || `Could not update question (HTTP ${response.status})`);
       setExamQuestions(previous => previous.map(question => question.id === data.id ? data : question));
       setEditingQuestionId(null);
     } catch (error) {
