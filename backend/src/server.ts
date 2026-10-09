@@ -190,6 +190,51 @@ app.get('/api/db/health', async (_req, res) => {
   catch { res.status(503).json({ status: 'disconnected', database }); }
 });
 
+// Faculty-owned reusable question bank.
+app.get('/api/question-bank', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
+  try {
+    const items = await prisma.questionBankItem.findMany({ where: { facultyId: authOf(req)!.userId }, orderBy: { updatedAt: 'desc' } });
+    return res.json(items);
+  } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not load question bank' }); }
+});
+
+app.post('/api/question-bank', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
+  const { subject, topic, type, prompt, marks, options, answerKey } = req.body;
+  const cleanPrompt = String(prompt ?? '').trim();
+  const cleanSubject = String(subject ?? '').trim();
+  const numericMarks = Number(marks);
+  if (!cleanSubject || !cleanPrompt || !['MCQ', 'DESCRIPTIVE'].includes(type) || !Number.isInteger(numericMarks) || numericMarks < 1 || numericMarks > 100) {
+    return res.status(400).json({ message: 'Subject, question text, question type and marks (1–100) are required' });
+  }
+  const cleanOptions = type === 'MCQ' ? String(options ?? '').split('|').map((value: string) => value.trim()).filter(Boolean) : [];
+  if (type === 'MCQ' && (cleanOptions.length < 2 || !answerKey || !cleanOptions.includes(String(answerKey).trim()))) {
+    return res.status(400).json({ message: 'MCQs need at least two options and a correct answer that matches one option' });
+  }
+  try {
+    const item = await prisma.questionBankItem.create({ data: {
+      facultyId: authOf(req)!.userId, subject: cleanSubject, topic: String(topic ?? '').trim() || null,
+      type, prompt: cleanPrompt, marks: numericMarks, options: cleanOptions.length ? cleanOptions.join('|') : null,
+      answerKey: String(answerKey ?? '').trim() || null
+    } });
+    return res.status(201).json(item);
+  } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not save question to bank' }); }
+});
+
+app.post('/api/question-bank/:id/add-to-exam', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
+  const item = await prisma.questionBankItem.findUnique({ where: { id: req.params.id } });
+  if (!item) return res.status(404).json({ message: 'Saved question not found' });
+  if (item.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'You can only reuse your own saved questions' });
+  const exam = await prisma.exam.findUnique({ where: { id: String(req.body.examId ?? '') } });
+  if (!exam) return res.status(404).json({ message: 'Target exam not found' });
+  if (exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the exam owner can add questions' });
+  if (exam.status !== 'DRAFT') return res.status(409).json({ message: 'Questions are locked after the test is published' });
+  const question = await prisma.question.create({ data: { examId: exam.id, type: item.type, prompt: item.prompt, marks: item.marks, options: item.options, answerKey: item.answerKey } });
+  return res.status(201).json(question);
+});
+
 app.get('/api/faculty/:facultyId/history', async (req, res) => {
   if (!requireRole(req, res, 'FACULTY')) return;
   if (authOf(req)?.userId !== req.params.facultyId) return res.status(403).json({ message: 'You can only view your own history' });
