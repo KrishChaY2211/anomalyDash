@@ -72,6 +72,7 @@ function App() {
   const [joinError, setJoinError] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [endingExam, setEndingExam] = useState(false);
+  const [confirmEndingExam, setConfirmEndingExam] = useState(false);
   const [activeAttempt, setActiveAttempt] = useState<any | null>(null);
   const [activeExam, setActiveExam] = useState<any | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -234,8 +235,11 @@ function App() {
   };
 
   const endLiveSession = async () => {
-    if (!selectedExam || selectedExam.status !== 'LIVE' || !currentUser) return;
-    if (!window.confirm('End this live session? Students who have not started will be blocked, and active attempts will be closed.')) return;
+    if (!selectedExam || selectedExam.status !== 'LIVE' || !currentUser || endingExam) return;
+    if (!confirmEndingExam) {
+      setConfirmEndingExam(true);
+      return;
+    }
     setEndingExam(true);
     try {
       const response = await apiFetch(`/api/exams/${selectedExam.id}/end`, {
@@ -243,11 +247,15 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facultyId: currentUser.id })
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || 'Could not end live session');
+      const responseText = await response.text();
+      let data: { message?: string; status?: string } = {};
+      try { data = responseText ? JSON.parse(responseText) : {}; } catch { /* handled below */ }
+      if (!response.ok) throw new Error(data.message || `Could not end live session (HTTP ${response.status})`);
+      if (data.status && data.status !== 'COMPLETED') throw new Error('The server did not confirm that the session was completed. Please refresh and try again.');
       const updatedExam = { ...selectedExam, status: 'COMPLETED' };
       setSelectedExam(updatedExam);
       setExams(prev => prev.map(exam => exam.id === selectedExam.id ? updatedExam : exam));
+      setConfirmEndingExam(false);
       void loadData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Could not end live session');
@@ -621,7 +629,7 @@ function App() {
             </>}
           </article>)}
         </section>}<div className="builder-footer"><span>{selectedExam._count?.questions ?? 0} question(s) added</span>{selectedExam.status === 'DRAFT' && <button className="primary" disabled={publishing || endingExam} onClick={publishExam}>{publishing ? 'Publishing…' : 'Publish test →'}</button>}
-{selectedExam.status === 'LIVE' && <button type="button" className="secondary danger-action" disabled={endingExam} onClick={()=>void endLiveSession()}>{endingExam ? 'Ending session…' : 'End live session'}</button>}{selectedExam.status === 'COMPLETED' && <button type="button" className="secondary danger-action" onClick={()=>void deleteCompletedExam(selectedExam)}>Remove completed test</button>}</div></section>}{selectedExam?.status === 'LIVE' && <section className="monitoring-launch"><div><span className="label">ANOMALY MONITORING</span><h2>Monitor this live examination.</h2><p>Open the dedicated monitoring screen to watch student behaviour signals in near real time.</p></div><button className="primary" type="button" onClick={() => navigate('faculty-monitoring')}>Open live monitoring →</button></section>}</section>}
+{selectedExam.status === 'LIVE' && <>{confirmEndingExam && <span role="status" className="end-session-prompt">End this session and close active attempts?</span>}<button type="button" className="secondary danger-action" disabled={endingExam} onClick={()=>void endLiveSession()}>{endingExam ? 'Ending session…' : confirmEndingExam ? 'Confirm end session' : 'End live session'}</button>{confirmEndingExam && !endingExam && <button type="button" className="secondary" onClick={()=>setConfirmEndingExam(false)}>Cancel</button>}</>}{selectedExam.status === 'COMPLETED' && <button type="button" className="secondary danger-action" onClick={()=>void deleteCompletedExam(selectedExam)}>Remove completed test</button>}</div></section>}{selectedExam?.status === 'LIVE' && <section className="monitoring-launch"><div><span className="label">ANOMALY MONITORING</span><h2>Monitor this live examination.</h2><p>Open the dedicated monitoring screen to watch student behaviour signals in near real time.</p></div><button className="primary" type="button" onClick={() => navigate('faculty-monitoring')}>Open live monitoring →</button></section>}</section>}
 
 
       {view === 'faculty-history' && currentUser?.role === 'FACULTY' && <section className="page workspace"><div className="page-topbar"><button className="overview-back" type="button" onClick={() => navigate('home')}>← Back to Overview</button></div><div className="page-heading"><div><span className="eyebrow">FACULTY HISTORY</span><h1>Past examinations.</h1><p>Review completed tests, participating students, scores and recorded anomaly signals.</p></div><button className="secondary" onClick={()=>void loadFacultyHistory()}>Refresh history</button></div>{historyLoading ? <div className="data-card"><p>Loading examination history…</p></div> : facultyHistory.length === 0 ? <div className="data-card"><p>No completed examinations yet.</p></div> : <div className="history-list">{facultyHistory.map((exam:any)=><article className="history-card" key={exam.id}><div className="history-card-head"><div><span className="label">COMPLETED TEST</span><h2>{exam.title}</h2><p>{exam.subject} · {exam.durationMin} min · {exam.attempts.length} student attempt(s)</p></div><span className="history-status">COMPLETED</span></div><div className="history-attempts">{exam.attempts.length === 0 ? <p>No student attempts recorded.</p> : exam.attempts.map((attempt:any)=><div className="history-attempt" key={attempt.id}><div><strong>{attempt.student.name}</strong><span>{attempt.student.rollNumber || attempt.student.email}</span></div><div><b>{attempt.score ?? 0} marks</b><span>{attempt.status}</span></div><div><b className={attempt.anomalyLevel === 'HIGH' ? 'anomaly-high' : attempt.anomalyLevel === 'MEDIUM' ? 'anomaly-medium' : 'anomaly-clear'}>{attempt.anomalyLevel} · {attempt.anomalyScore}</b><span>Anomaly score</span></div></div>)}</div></article>)}</div>}</section>}
