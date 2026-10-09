@@ -401,11 +401,43 @@ app.post('/api/attempts/:id/submit', async (req, res) => {
     if (attempt.status !== 'IN_PROGRESS') return res.status(409).json({ message: 'This exam attempt is already closed' });
     const now = new Date();
     const expired = attempt.expiresAt <= now;
-    const answerMap = new Map(attempt.answers.map(a => [a.questionId, a.answer.trim().toLowerCase()]));
-    const score = attempt.exam.questions.reduce((total, q) => total + (q.type === 'MCQ' && q.answerKey && answerMap.get(q.id) === q.answerKey.trim().toLowerCase() ? q.marks : 0), 0);
-    const updated = await prisma.examAttempt.update({ where: { id: attempt.id }, data: { status: expired ? 'EXPIRED' : 'SUBMITTED', submittedAt: now, score } });
-    return res.json({ attempt: updated, score });
+    const answerMap = new Map(attempt.answers.map(a => [a.questionId, a.answer.trim()]));
+    const monitoringEvents = await prisma.monitoringEvent.findMany({ where: { attemptId: attempt.id }, orderBy: { createdAt: 'asc' } });
+    const detection = scoreAnomaly(monitoringEvents, attempt.exam);
+    const needsReview = detection.score >= attempt.exam.mediumThreshold;
+    const score = needsReview ? null : attempt.exam.questions.reduce((total, q) => {
+      const answer = (answerMap.get(q.id) ?? '').trim();
+      if (!answer) return total;
+      if (q.type === 'MCQ') return total + (q.answerKey && answer.toLowerCase() === q.answerKey.trim().toLowerCase() ? q.marks : 0);
+      const keywords = (q.answerKeywords ?? '').split(',').map(word => word.trim().toLowerCase()).filter(Boolean);
+      if (!keywords.length) return total;
+      const normalized = answer.toLowerCase().normalize('NFKC');
+      const matched = keywords.filter(word => normalized.includes(word));
+      return total + Math.round(q.marks * matched.length / keywords.length);
+    }, 0);
+    const updated = await prisma.examAttempt.update({
+      where: { id: attempt.id },
+      data: { status: expired ? 'EXPIRED' : 'SUBMITTED', submittedAt: now, score, gradingStatus: needsReview ? 'REVIEW_REQUIRED' : 'AUTO_GRADED', anomalyScore: detection.score, anomalyLevel: detection.anomalyLevel }
+    });
+    return res.json({ attempt: updated, score, gradingStatus: updated.gradingStatus, anomalyScore: detection.score, message: needsReview ? 'Submission received and flagged for faculty review due to its anomaly score.' : 'Submission graded automatically using the answer key and keywords.' });
   } catch (error) { console.error(error); return res.status(500).json({ message: 'Could not submit exam' }); }
+});
+
+app.patch('/api/attempts/:id/grade', async (req, res) => {
+  if (!requireRole(req, res, 'FACULTY')) return;
+  try {
+    const attempt = await prisma.examAttempt.findUnique({ where: { id: req.params.id }, include: { exam: { include: { questions: true } } } });
+    if (!attempt) return res.status(404).json({ message: 'Exam attempt not found' });
+    if (attempt.exam.facultyId !== authOf(req)!.userId) return res.status(403).json({ message: 'Only the exam owner can grade this attempt' });
+    const score = Number(req.body.score);
+    const maxScore = attempt.exam.questions.reduce((sum, q) => sum + q.marks, 0);
+    if (!Number.isInteger(score) || score < 0 || score > maxScore) return res.status(400).json({ message: `Score must be a whole number between 0 and ${maxScore}` });
+    const updated = await prisma.examAttempt.update({ where: { id: attempt.id }, data: { score, gradingStatus: 'FACULTY_REVIEWED' } });
+    return res.json({ attempt: updated, message: 'Faculty grade saved' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Could not save faculty grade' });
+  }
 });
 
 app.get('/api/exams/:id', async (req, res) => {
@@ -420,7 +452,7 @@ app.get('/api/exams/:id', async (req, res) => {
 
 app.post('/api/exams/:id/questions', async (req, res) => {
   if (!requireRole(req, res, 'FACULTY')) return;
-  const { type, prompt, marks, options, answerKey } = req.body;
+  const { type, prompt, marks, options, answerKey, answerKeywords } = req.body;
   if (!prompt || !marks || !['MCQ', 'DESCRIPTIVE'].includes(type)) return res.status(400).json({ message: 'type, prompt and marks are required' });
   const exam = await prisma.exam.findUnique({ where: { id: req.params.id } });
   if (!exam) return res.status(404).json({ message: 'Test not found' });
@@ -433,7 +465,8 @@ app.post('/api/exams/:id/questions', async (req, res) => {
       prompt: String(prompt).trim(),
       marks: Number(marks),
       options: options ? String(options).trim() : null,
-      answerKey: answerKey ? String(answerKey).trim() : null
+      answerKey: answerKey ? String(answerKey).trim() : null,
+      answerKeywords: answerKeywords ? String(answerKeywords).split(',').map((word: string) => word.trim()).filter(Boolean).join(',') : null
     }
   });
   return res.status(201).json(question);
