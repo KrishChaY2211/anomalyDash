@@ -4,14 +4,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "frontend/dist",
   "functions": {
-    "backend/src/server.ts": {
+    "api/[...path].ts": {
       "maxDuration": 60
     }
-  },
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/backend/src/server.ts"
-    }
-  ]
+  }
 }
